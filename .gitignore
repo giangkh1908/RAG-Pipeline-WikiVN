@@ -1,0 +1,48 @@
+# Environment variables (API keys)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Index files (generated)
+index/
+*.idx
+*.pkl
+
+# Data files (large)
+documents/
+document/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Docker
+docker-compose.override.yml

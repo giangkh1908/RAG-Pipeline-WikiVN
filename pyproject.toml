@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legal-rag-pipeline"
+version = "0.1.0"
+description = "Production-first RAG pipeline scaffold for Vietnamese legal documents."
+readme = "PLAN.md"
+requires-python = ">=3.11"
+dependencies = ["python-dotenv>=1.0.0"]
+
+[project.optional-dependencies]
+ingest = ["datasets>=2.20.0"]
+indexing = ["httpx>=0.27.0", "qdrant-client>=1.13.0,<1.14.0"]
+dev = ["pytest>=8.2.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

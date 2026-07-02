@@ -1,0 +1,338 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Auto-load .env từ thư mục gốc của project
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
+
+from rag_pipeline.config import EmbeddingConfig, IngestConfig, QdrantConfig, QueryConfig, RetrievalConfig
+from rag_pipeline.indexing.bm25_index import BM25Index
+from rag_pipeline.indexing.embedder import DeterministicTestEmbedder, OpenRouterEmbeddingClient
+from rag_pipeline.indexing.llm_client import OpenRouterLLMClient
+from rag_pipeline.indexing.reranker import BGEReranker, CohereReranker, DeterministicTestReranker
+from rag_pipeline.indexing.vector_store import InMemoryVectorStore, QdrantVectorStore
+from rag_pipeline.ingest.dataset import (
+    HuggingFaceDatasetReader,
+    LocalCorpusCsvReader,
+    LocalJsonlReader,
+    LocalQueryCsvReader,
+)
+from rag_pipeline.ingest.normalize import UVWWikipediaDocumentNormalizer
+from rag_pipeline.models import ProcessedQuery, QueryRecord, RetrievalResult
+from rag_pipeline.pipelines.ingest_pipeline import IngestPipeline
+from rag_pipeline.pipelines.query_pipeline import QueryPipeline
+from rag_pipeline.pipelines.retrieval_pipeline import RetrievalPipeline
+from rag_pipeline.query.guardrails import QueryGuardrails
+from rag_pipeline.query.normalizer import QueryNormalizer
+from rag_pipeline.query.rewriter import QueryRewriter
+from rag_pipeline.transform.chunker import RecursiveChunker
+from rag_pipeline.transform.cleaner import WikipediaArticleCleaner
+
+
+def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> IngestPipeline:
+    """Build pipeline: InMemory + DeterministicEmbedder (dev) or Qdrant + OpenRouter (prod)."""
+    if use_qdrant:
+        if not os.getenv(config.embedding.api_key_env):
+            raise RuntimeError(
+                f"Production mode requires {config.embedding.api_key_env} environment variable."
+            )
+        vector_store = QdrantVectorStore(config.qdrant)
+        embedder = OpenRouterEmbeddingClient(
+            config.embedding,
+            parallel_workers=config.embedding.parallel_workers,
+        )
+    else:
+        vector_store = InMemoryVectorStore()
+        embedder = DeterministicTestEmbedder()
+
+    return IngestPipeline(
+        normalizer=UVWWikipediaDocumentNormalizer(
+            jurisdiction=config.jurisdiction,
+            language=config.language,
+        ),
+        cleaner=WikipediaArticleCleaner(),
+        chunker=RecursiveChunker(config.chunking),
+        embedder=embedder,
+        vector_store=vector_store,
+        skip_qdrant_check=skip_qdrant_check,
+    )
+
+
+def ingest_from_huggingface(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> list[str]:
+    pipeline = build_ingest_pipeline(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    reader = HuggingFaceDatasetReader(
+        dataset_name=config.hf_dataset_name,
+        split=config.hf_dataset_split,
+        sample_percent=config.hf_sample_percent,
+        min_quality_score=config.hf_min_quality_score,
+    )
+    results = pipeline.run(reader.read())
+    return [result.document.doc_id for result in results if result.updated]
+
+
+def ingest_from_local_jsonl(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> list[str]:
+    pipeline = build_ingest_pipeline(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    reader = LocalJsonlReader(config.jsonl_path, sample_percent=config.jsonl_sample_percent)
+    results = pipeline.run(reader.read())
+    return [result.document.doc_id for result in results if result.updated]
+
+
+def ingest_from_local_corpus(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> list[str]:
+    pipeline = build_ingest_pipeline(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    reader = LocalCorpusCsvReader(config.corpus_path)
+    results = pipeline.run(reader.read())
+    return [result.document.doc_id for result in results if result.updated]
+
+
+def ingest(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> list[str]:
+    if config.source_type == "local_jsonl":
+        return ingest_from_local_jsonl(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    if config.source_type == "huggingface":
+        return ingest_from_huggingface(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    if config.source_type == "local_corpus":
+        return ingest_from_local_corpus(config, use_qdrant=use_qdrant, skip_qdrant_check=skip_qdrant_check)
+    raise ValueError(f"Unsupported source_type: {config.source_type}")
+
+
+def load_eval_queries(config: IngestConfig, split: str = "val") -> list[QueryRecord]:
+    query_paths = {
+        "train": config.train_queries_path,
+        "train_split": config.train_split_queries_path,
+        "val": config.validation_queries_path,
+        "public_test": config.public_test_queries_path,
+    }
+    reader = LocalQueryCsvReader(query_paths[split])
+    return list(reader.read())
+
+
+def build_query_pipeline(config: QueryConfig, use_llm: bool = False) -> QueryPipeline:
+    """Build query processing pipeline.
+
+    Args:
+        config: Query configuration
+        use_llm: If True, use OpenRouter LLM for rewrite. If False, use normalization only.
+
+    Returns:
+        QueryPipeline instance
+    """
+    normalizer = QueryNormalizer()
+    guardrails = QueryGuardrails()
+
+    rewriter = None
+    if use_llm and config.enable_rewrite:
+        llm_client = OpenRouterLLMClient(config.llm)
+        rewriter = QueryRewriter(llm=llm_client)
+
+    return QueryPipeline(
+        config=config,
+        normalizer=normalizer,
+        guardrails=guardrails,
+        rewriter=rewriter,
+    )
+
+
+def build_retrieval_pipeline(
+    retrieval_config: RetrievalConfig | None = None,
+    qdrant_config: QdrantConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    use_qdrant: bool = True,
+    use_reranker: bool = False,
+) -> RetrievalPipeline:
+    """Build retrieval pipeline.
+
+    Args:
+        retrieval_config: Retrieval configuration
+        qdrant_config: Qdrant configuration
+        embedding_config: Embedding configuration
+        use_qdrant: If True, use Qdrant. If False, use InMemory.
+        use_reranker: If True, use BGE re-ranker. If False, use test reranker.
+
+    Returns:
+        RetrievalPipeline instance
+    """
+    if retrieval_config is None:
+        retrieval_config = RetrievalConfig()
+    if qdrant_config is None:
+        qdrant_config = QdrantConfig()
+    if embedding_config is None:
+        embedding_config = EmbeddingConfig()
+
+    # Vector store
+    if use_qdrant:
+        vector_store = QdrantVectorStore(qdrant_config)
+        embedder = OpenRouterEmbeddingClient(embedding_config)
+    else:
+        vector_store = InMemoryVectorStore()
+        embedder = DeterministicTestEmbedder()
+
+    # BM25 index
+    bm25_index = BM25Index(
+        index_path=retrieval_config.bm25_index_path,
+        tokenizer_name=retrieval_config.bm25_tokenizer,
+    )
+    bm25_index.load()  # Try to load existing index
+
+    # Re-ranker
+    reranker = None
+    if retrieval_config.enable_rerank:
+        if use_reranker:
+            if retrieval_config.rerank_provider == "cohere":
+                reranker = CohereReranker(
+                    model_name=retrieval_config.rerank_model,
+                    api_key_env=retrieval_config.rerank_api_key_env,
+                )
+            else:
+                reranker = BGEReranker(model_name=retrieval_config.rerank_model)
+        else:
+            reranker = DeterministicTestReranker()
+
+    return RetrievalPipeline(
+        config=retrieval_config,
+        embedder=embedder,
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        reranker=reranker,
+    )
+
+
+def search(question: str, use_qdrant: bool = True, use_reranker: bool = False) -> RetrievalResult:
+    """Run full search pipeline: query processing → retrieval.
+
+    Args:
+        question: User question
+        use_qdrant: If True, use Qdrant
+        use_reranker: If True, use BGE re-ranker
+
+    Returns:
+        RetrievalResult with passages and context
+    """
+    # Step 1: Query processing
+    query_config = QueryConfig()
+    processed = process_query(question, config=query_config, use_llm=True)
+
+    # Step 2: Retrieval
+    retrieval_config = RetrievalConfig()
+    pipeline = build_retrieval_pipeline(
+        retrieval_config=retrieval_config,
+        use_qdrant=use_qdrant,
+        use_reranker=use_reranker,
+    )
+    return pipeline.run(processed)
+
+
+def process_query(query: str, config: QueryConfig | None = None, use_llm: bool = False) -> ProcessedQuery:
+    """Process a single query through the pipeline.
+
+    Args:
+        query: User question
+        config: Query configuration (uses default if None)
+        use_llm: If True, use LLM for rewrite
+
+    Returns:
+        ProcessedQuery ready for retrieval
+    """
+    if config is None:
+        config = QueryConfig()
+
+    pipeline = build_query_pipeline(config, use_llm=use_llm)
+    return pipeline.run(query, qid="cli")
+
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    import sys
+
+    # Fix Windows encoding
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    parser = argparse.ArgumentParser(description="RAG Pipeline CLI")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    # Ingest command
+    ingest_parser = subparsers.add_parser("ingest", help="Ingest documents into Qdrant")
+    ingest_parser.add_argument("--sample", type=float, default=100.0, help="Sample percent (default: 100 = full)")
+    ingest_parser.add_argument("--qdrant", action="store_true", default=True, help="Use Qdrant (default: True)")
+    ingest_parser.add_argument("--clear", action="store_true", default=False, help="Clear Qdrant collection before ingest")
+
+    # Query command
+    query_parser = subparsers.add_parser("query", help="Process a query")
+    query_parser.add_argument("--question", type=str, required=True, help="Question to process")
+    query_parser.add_argument("--llm", action="store_true", default=False, help="Use LLM for query rewrite")
+
+    # Search command
+    search_parser = subparsers.add_parser("search", help="Search documents")
+    search_parser.add_argument("--question", type=str, required=True, help="Question to search")
+    search_parser.add_argument("--no-qdrant", action="store_true", default=False, help="Use InMemory instead of Qdrant")
+    search_parser.add_argument("--rerank", action="store_true", default=False, help="Use BGE re-ranker")
+
+    args = parser.parse_args()
+
+    if args.command == "ingest":
+        if args.clear and args.qdrant:
+            from qdrant_client import QdrantClient
+            from rag_pipeline.config import QdrantConfig
+            cfg = QdrantConfig()
+            client = QdrantClient(url=cfg.url)
+            try:
+                client.delete_collection(cfg.collection_name)
+                print(f"🗑️  Deleted collection '{cfg.collection_name}'")
+            except Exception:
+                print(f"ℹ️  Collection '{cfg.collection_name}' not found — starting fresh")
+
+        skip_qdrant_check = args.clear
+
+        config = IngestConfig(
+            source_type="local_jsonl",
+            jsonl_path="documents/train.jsonl",
+            jsonl_sample_percent=args.sample,
+        )
+        doc_ids = ingest(config, use_qdrant=args.qdrant, skip_qdrant_check=skip_qdrant_check)
+        print(f"✅ Indexed {len(doc_ids)} documents")
+
+    elif args.command == "query":
+        result = process_query(args.question, use_llm=args.llm)
+        print(json.dumps({
+            "qid": result.qid,
+            "original_query": result.original_query,
+            "normalized_query": result.normalized_query,
+            "rewrite_query": result.rewrite_query,
+            "bm25_query": result.bm25_query,
+            "intent": result.intent,
+            "filters": result.filters,
+            "risk_flags": result.risk_flags,
+        }, ensure_ascii=False, indent=2))
+
+    elif args.command == "search":
+        result = search(
+            question=args.question,
+            use_qdrant=not args.no_qdrant,
+            use_reranker=args.rerank,
+        )
+        print(json.dumps({
+            "query": result.query.original_query,
+            "passages": [
+                {
+                    "rank": p.rank,
+                    "title": p.title,
+                    "text": p.text[:200] + "..." if len(p.text) > 200 else p.text,
+                    "source_url": p.source_url,
+                    "scores": {
+                        "dense": round(p.dense_score, 4),
+                        "bm25": round(p.bm25_score, 4),
+                        "rrf": round(p.rrf_score, 4),
+                        "rerank": round(p.rerank_score, 4),
+                    },
+                }
+                for p in result.passages
+            ],
+            "context": result.context[:500] + "..." if len(result.context) > 500 else result.context,
+            "metadata": result.metadata,
+        }, ensure_ascii=False, indent=2))
+
+    else:
+        parser.print_help()
