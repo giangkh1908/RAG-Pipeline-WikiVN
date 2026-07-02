@@ -70,7 +70,7 @@ python -m rag_pipeline.main query --question "Thủ đô Việt Nam ở đâu?" 
 ## Phase 3: Retrieval (Hybrid Search + Re-ranking) — HOÀN THÀNH ✅
 
 ### Mục tiêu
-Từ ProcessedQuery → hybrid search (dense + BM25) → RRF fusion → BGE re-rank → top-k results.
+Từ ProcessedQuery → hybrid search (dense + BM25) → RRF fusion → Cohere re-rank → top-k results.
 
 ### Pipeline flow
 ```
@@ -78,7 +78,7 @@ ProcessedQuery
     ├─ Dense search: embed rewrite_query → Qdrant top_k=50
     ├─ BM25 search: bm25_query → BM25 index top_k=50
     └─ RRF fusion: merge 2 kết quả → top_k=20
-    → BGE Re-ranker: re-rank top 20 → top 5
+    → Cohere Re-ranker: re-rank top 20 → top 5
     → RetrievalResult (passages + context)
 ```
 
@@ -107,12 +107,13 @@ ProcessedQuery
 - Sort theo RRF score descending
 - Lấy top 20 passages
 
-**3.5. BGE Re-ranking**
-- Model: `BAAI/bge-reranker-v2-m3` (cross-encoder, hỗ trợ đa ngôn ngữ)
-- Input: (query, passage) pairs cho top 20
-- Output: relevance scores
+**3.5. Cohere Re-ranking**
+- API: Cohere Rerank API v2 (`https://api.cohere.com/v2/rerank`)
+- Model: `rerank-v3.5` (multilingual, hỗ trợ tiếng Việt)
+- Free tier: 100 search units/tháng
+- Input: query + documents (top 20 passages)
+- Output: relevance scores [0, 1]
 - Sort theo score descending → lấy top 5
-- Có thể chạy local (transformers) hoặc API
 
 **3.6. Context Assembly**
 - Lấy top 5 passages
@@ -137,7 +138,7 @@ class Passage:
     dense_score: float             # cosine similarity score
     bm25_score: float              # BM25 score
     rrf_score: float               # RRF fusion score
-    rerank_score: float            # BGE re-rank score
+    rerank_score: float            # Cohere re-rank score
     rank: int                      # final rank (1-5)
 ```
 
@@ -328,6 +329,6 @@ class MonitoringConfig:
 |-------|-----------|-------|
 | 1. Ingest | ✅ Hoàn thành | 1.1M docs → Qdrant |
 | 2. Query Processing | ✅ Hoàn thành | Normalize → guardrails → rewrite |
-| 3. Retrieval | ✅ Hoàn thành | Hybrid (dense + BM25) → RRF → BGE re-rank |
+| 3. Retrieval | ✅ Hoàn thành | Hybrid (dense + BM25) → RRF → Cohere re-rank |
 | 4. Orchestration + Generation | 🔲 Chưa làm | RAG pipeline → LLM generate → output guardrails |
 | 5. Eval + Monitoring | 🔲 Chưa làm | RAGAS/TruLens + tracing + alerting |
