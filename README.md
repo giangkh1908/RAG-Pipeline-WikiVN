@@ -7,7 +7,7 @@ Hỏi đáp dựa trên 1.1 triệu bài viết Wikipedia tiếng Việt, sử d
 | Component | Technology |
 |-----------|------------|
 | Backend | FastAPI + Python |
-| Frontend | React 19 + Vite 6 + Tailwind CSS v4 |
+| Frontend | React 19 + Vite 6 + Tailwind CSS v4 (responsive) |
 | Vector Store | Qdrant |
 | Embedding | OpenRouter (nvidia/llama-nemotron-embed-vl-1b-v2:free, 2048-dim) |
 | LLM | OpenRouter (deepseek/deepseek-v4-flash) |
@@ -132,6 +132,28 @@ python -m rag_pipeline.api.app
 
 ---
 
+## Frontend
+
+Chat UI responsive, hoạt động trên mobile và desktop.
+
+**Features:**
+- SSE streaming token-by-token
+- Auto-expanding textarea
+- Gợi ý câu hỏi (click để gửi)
+- Citations hiển thị nguồn Wikipedia
+- Responsive: mobile horizontal scroll, desktop wrap
+
+**Truy cập từ điện thoại:**
+```bash
+# Tìm IP của máy
+ipconfig  # Windows
+
+# Truy cập từ điện thoại
+http://<your-ip>:8000
+```
+
+---
+
 ## API Endpoints
 
 | Method | Path | Mô tả |
@@ -150,9 +172,19 @@ curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"question": "Python là gì?"}'
 
-# SSE streaming
+# SSE streaming (mặc định skip_rewrite=true, ~6-8s)
 curl -N "http://localhost:8000/api/chat/stream?question=Python+la+gi"
+
+# Full pipeline với query rewrite (~12-16s)
+curl -N "http://localhost:8000/api/chat/stream?question=Python+la+gi&skip_rewrite=false"
 ```
+
+### Streaming Modes
+
+| Mode | Flag | TTFT | Khi nào dùng |
+|------|------|------|---------------|
+| Fast (default) | `skip_rewrite=true` | ~6-8s | Câu hỏi đơn giản |
+| Full | `skip_rewrite=false` | ~12-16s | Câu phức tạp, cần query rewrite |
 
 ---
 

@@ -619,6 +619,8 @@ frontend/
 - [x] Vite proxy → backend (dev mode)
 - [x] FastAPI serve frontend/dist (production)
 - [x] Build pass, TypeScript no errors
+- [x] Responsive design (mobile + desktop)
+- [x] ChatGPT-style UI (auto-expand input, suggestions, numbered citations)
 
 ---
 

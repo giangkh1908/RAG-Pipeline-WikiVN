@@ -1,6 +1,6 @@
 # Frontend — React Chat Interface
 
-React 19 chat UI kết nối FastAPI backend qua SSE streaming.
+React 19 chat UI kết nối FastAPI backend qua SSE streaming. Responsive cho mobile.
 
 ## Tech Stack
 
@@ -17,16 +17,16 @@ frontend/
 │   ├── api/
 │   │   └── client.ts         # fetch + ReadableStream wrapper
 │   ├── components/
-│   │   ├── ChatInput.tsx      # Textarea + send button
-│   │   ├── CitationCard.tsx   # Wikipedia source link
-│   │   └── MessageBubble.tsx  # User/assistant message
+│   │   ├── ChatInput.tsx      # Input + suggestions + send button
+│   │   ├── CitationCard.tsx   # Numbered source tag [1] [2]
+│   │   └── MessageBubble.tsx  # User bubble / Assistant text
 │   ├── hooks/
-│   │   └── useChat.ts         # Chat state + SSE streaming logic
+│   │   └── useChat.ts         # Chat state + SSE streaming
 │   ├── types/
 │   │   └── index.ts           # TypeScript interfaces
-│   ├── App.tsx                # Root component
+│   ├── App.tsx                # Root layout
 │   ├── main.tsx               # Entry point
-│   └── index.css              # Tailwind import
+│   └── index.css              # Tailwind + scrollbar-hide
 ├── package.json
 ├── vite.config.ts             # Tailwind plugin + API proxy
 └── tsconfig.json
@@ -52,6 +52,41 @@ cd frontend && npm run build
 python -m rag_pipeline.api.app
 # → http://localhost:8000
 ```
+
+## Responsive Design
+
+Mobile-first, hoạt động tốt trên mọi kích thước:
+
+| Breakpoint | Changes |
+|------------|---------|
+| `< 640px` (mobile) | Suggestions horizontal scroll, input full-width, compact padding |
+| `≥ 640px` (tablet+) | Suggestions wrap + center, larger padding |
+
+**Mobile optimizations:**
+- `h-[100dvh]` — full viewport, tránh browser bar
+- `overscroll-behavior: none` — bỏ bounce iOS
+- `-webkit-tap-highlight-color: transparent` — bỏ highlight xanh
+- `active:bg-gray-100` — touch feedback
+- `.scrollbar-hide` — ẩn scrollbar cho suggestions
+
+## Components
+
+### ChatInput
+- Auto-expanding textarea (tối đa 160px)
+- Nút gửi hình mũi tên (như ChatGPT)
+- Spinner khi đang loading
+- Gợi ý câu hỏi (click để gửi)
+- Horizontal scroll trên mobile, wrap trên desktop
+
+### MessageBubble
+- **User**: bubble xám, căn phải (như iMessage)
+- **Assistant**: text trần, căn trái (như ChatGPT/Claude)
+- Streaming: 3 dấu chấm nhảy khi chờ, cursor nhấp nháy khi đang stream
+
+### CitationCard
+- Tag nhỏ có số [1] [2] [3]
+- Tên bài viết Wikipedia
+- Click mở link trong tab mới
 
 ## SSE Streaming Flow
 
