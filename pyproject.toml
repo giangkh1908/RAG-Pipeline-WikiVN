@@ -13,6 +13,8 @@ dependencies = ["python-dotenv>=1.0.0"]
 [project.optional-dependencies]
 ingest = ["datasets>=2.20.0"]
 indexing = ["httpx>=0.27.0", "qdrant-client>=1.13.0,<1.14.0"]
+monitoring = ["langsmith>=0.9.0"]
+eval = ["ragas>=0.4.0", "litellm>=1.70.0"]
 dev = ["pytest>=8.2.0"]
 
 [tool.setuptools]

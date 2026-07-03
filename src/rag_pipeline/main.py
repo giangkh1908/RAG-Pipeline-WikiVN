@@ -8,10 +8,20 @@ from dotenv import load_dotenv
 # Auto-load .env từ thư mục gốc của project
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
 
-from rag_pipeline.config import EmbeddingConfig, IngestConfig, QdrantConfig, QueryConfig, RetrievalConfig
+from rag_pipeline.config import (
+    EmbeddingConfig,
+    EvalConfig,
+    GenerationConfig,
+    IngestConfig,
+    LLMConfig,
+    OutputGuardrailsConfig,
+    QdrantConfig,
+    QueryConfig,
+    RetrievalConfig,
+)
 from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import DeterministicTestEmbedder, OpenRouterEmbeddingClient
-from rag_pipeline.indexing.llm_client import OpenRouterLLMClient
+from rag_pipeline.indexing.llm_client import DeterministicTestLLM, OpenRouterLLMClient
 from rag_pipeline.indexing.reranker import BGEReranker, CohereReranker, DeterministicTestReranker
 from rag_pipeline.indexing.vector_store import InMemoryVectorStore, QdrantVectorStore
 from rag_pipeline.ingest.dataset import (
@@ -21,7 +31,13 @@ from rag_pipeline.ingest.dataset import (
     LocalQueryCsvReader,
 )
 from rag_pipeline.ingest.normalize import UVWWikipediaDocumentNormalizer
-from rag_pipeline.models import ProcessedQuery, QueryRecord, RetrievalResult
+from rag_pipeline.models import AnswerResult, ProcessedQuery, QueryRecord, RetrievalResult
+from rag_pipeline.eval.report import EvalReport
+from rag_pipeline.eval.runner import EvalRunner
+from rag_pipeline.generation.answer_generator import AnswerGenerator
+from rag_pipeline.generation.output_guardrails import OutputGuardrails
+from rag_pipeline.generation.prompt_builder import PromptBuilder
+from rag_pipeline.pipelines.answer_pipeline import AnswerPipeline
 from rag_pipeline.pipelines.ingest_pipeline import IngestPipeline
 from rag_pipeline.pipelines.query_pipeline import QueryPipeline
 from rag_pipeline.pipelines.retrieval_pipeline import RetrievalPipeline
@@ -182,7 +198,7 @@ def build_retrieval_pipeline(
             if retrieval_config.rerank_provider == "cohere":
                 reranker = CohereReranker(
                     model_name=retrieval_config.rerank_model,
-                    api_key_env=retrieval_config.rerank_api_key_env,
+                    api_key_env=retrieval_config.api_key_env,
                 )
             else:
                 reranker = BGEReranker(model_name=retrieval_config.rerank_model)
@@ -241,6 +257,135 @@ def process_query(query: str, config: QueryConfig | None = None, use_llm: bool =
     return pipeline.run(query, qid="cli")
 
 
+def build_generation_pipeline(
+    gen_config: GenerationConfig | None = None,
+    output_config: OutputGuardrailsConfig | None = None,
+    llm_config: LLMConfig | None = None,
+    retrieval_pipeline: RetrievalPipeline | None = None,
+    query_pipeline: QueryPipeline | None = None,
+    use_test_llm: bool = False,
+) -> AnswerPipeline:
+    """Build the full RAG answer pipeline.
+
+    Args:
+        gen_config: Generation configuration
+        output_config: Output guardrails configuration
+        llm_config: LLM configuration
+        retrieval_pipeline: Pre-built retrieval pipeline (builds default if None)
+        query_pipeline: Pre-built query pipeline (builds default if None)
+        use_test_llm: If True, use DeterministicTestLLM instead of OpenRouter
+
+    Returns:
+        AnswerPipeline instance
+    """
+    if gen_config is None:
+        gen_config = GenerationConfig()
+    if output_config is None:
+        output_config = OutputGuardrailsConfig()
+    if llm_config is None:
+        llm_config = LLMConfig()
+
+    # Build sub-pipelines if not provided
+    if query_pipeline is None:
+        query_pipeline = build_query_pipeline(QueryConfig(llm=llm_config), use_llm=True)
+    if retrieval_pipeline is None:
+        retrieval_pipeline = build_retrieval_pipeline()
+
+    # LLM client for generation
+    if use_test_llm:
+        llm_client = DeterministicTestLLM(response_mode="generation")
+    else:
+        llm_client = OpenRouterLLMClient(llm_config)
+
+    prompt_builder = PromptBuilder(gen_config)
+    answer_generator = AnswerGenerator(
+        llm_client=llm_client,
+        prompt_builder=prompt_builder,
+        config=gen_config,
+    )
+    output_guardrails = OutputGuardrails(output_config)
+
+    return AnswerPipeline(
+        query_pipeline=query_pipeline,
+        retrieval_pipeline=retrieval_pipeline,
+        answer_generator=answer_generator,
+        output_guardrails=output_guardrails,
+    )
+
+
+def ask(
+    question: str,
+    use_qdrant: bool = True,
+    use_reranker: bool = False,
+    use_llm: bool = True,
+) -> AnswerResult:
+    """Run full RAG pipeline: question → answer with citations.
+
+    Args:
+        question: User question
+        use_qdrant: If True, use Qdrant
+        use_reranker: If True, use re-ranker
+        use_llm: If True, use LLM for query rewrite
+
+    Returns:
+        AnswerResult with answer, citations, and confidence
+    """
+    query_config = QueryConfig()
+    query_pipeline = build_query_pipeline(query_config, use_llm=use_llm)
+
+    retrieval_config = RetrievalConfig()
+    retrieval_pipeline = build_retrieval_pipeline(
+        retrieval_config=retrieval_config,
+        use_qdrant=use_qdrant,
+        use_reranker=use_reranker,
+    )
+
+    gen_config = GenerationConfig()
+    llm_config = LLMConfig()
+    pipeline = build_generation_pipeline(
+        gen_config=gen_config,
+        llm_config=llm_config,
+        retrieval_pipeline=retrieval_pipeline,
+        query_pipeline=query_pipeline,
+    )
+    return pipeline.ask(question)
+
+
+def build_ask_pipeline(
+    use_qdrant: bool = True,
+    use_reranker: bool = False,
+    use_llm: bool = True,
+) -> AnswerPipeline:
+    """Build the full answer pipeline for streaming use.
+
+    Args:
+        use_qdrant: If True, use Qdrant
+        use_reranker: If True, use re-ranker
+        use_llm: If True, use LLM for query rewrite
+
+    Returns:
+        AnswerPipeline instance
+    """
+    query_config = QueryConfig()
+    query_pipeline = build_query_pipeline(query_config, use_llm=use_llm)
+
+    retrieval_config = RetrievalConfig()
+    retrieval_pipeline = build_retrieval_pipeline(
+        retrieval_config=retrieval_config,
+        use_qdrant=use_qdrant,
+        use_reranker=use_reranker,
+    )
+
+    gen_config = GenerationConfig()
+    llm_config = LLMConfig()
+    return build_generation_pipeline(
+        gen_config=gen_config,
+        llm_config=llm_config,
+        retrieval_pipeline=retrieval_pipeline,
+        query_pipeline=query_pipeline,
+    )
+
+
 if __name__ == "__main__":
     import argparse
     import json
@@ -262,13 +407,29 @@ if __name__ == "__main__":
     # Query command
     query_parser = subparsers.add_parser("query", help="Process a query")
     query_parser.add_argument("--question", type=str, required=True, help="Question to process")
-    query_parser.add_argument("--llm", action="store_true", default=False, help="Use LLM for query rewrite")
+    query_parser.add_argument("--no-llm", action="store_true", default=False, help="Disable LLM for query rewrite")
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Search documents")
     search_parser.add_argument("--question", type=str, required=True, help="Question to search")
     search_parser.add_argument("--no-qdrant", action="store_true", default=False, help="Use InMemory instead of Qdrant")
     search_parser.add_argument("--rerank", action="store_true", default=False, help="Use BGE re-ranker")
+
+    # Ask command (Phase 4: full RAG pipeline)
+    ask_parser = subparsers.add_parser("ask", help="Ask a question (full RAG pipeline)")
+    ask_parser.add_argument("--question", type=str, required=True, help="Question to ask")
+    ask_parser.add_argument("--no-qdrant", action="store_true", default=False, help="Use InMemory instead of Qdrant")
+    ask_parser.add_argument("--rerank", action="store_true", default=False, help="Use re-ranker")
+    ask_parser.add_argument("--no-llm", action="store_true", default=False, help="Disable LLM query rewrite")
+    ask_parser.add_argument("--text", action="store_true", default=False, help="Output answer text only (user-friendly)")
+    ask_parser.add_argument("--stream", action="store_true", default=False, help="Stream response tokens in real-time")
+
+    # Eval command (Phase 5: RAGAS evaluation)
+    eval_parser = subparsers.add_parser("eval", help="Run RAGAS evaluation")
+    eval_parser.add_argument("--dataset", type=str, default="documents/eval.csv", help="Eval dataset CSV path")
+    eval_parser.add_argument("--output", type=str, default="eval_report.json", help="Output report path (JSON)")
+    eval_parser.add_argument("--limit", type=int, default=50, help="Max samples to evaluate")
+    eval_parser.add_argument("--no-qdrant", action="store_true", default=False, help="Use InMemory instead of Qdrant")
 
     args = parser.parse_args()
 
@@ -295,7 +456,7 @@ if __name__ == "__main__":
         print(f"✅ Indexed {len(doc_ids)} documents")
 
     elif args.command == "query":
-        result = process_query(args.question, use_llm=args.llm)
+        result = process_query(args.question, use_llm=not args.no_llm)
         print(json.dumps({
             "qid": result.qid,
             "original_query": result.original_query,
@@ -333,6 +494,100 @@ if __name__ == "__main__":
             "context": result.context[:500] + "..." if len(result.context) > 500 else result.context,
             "metadata": result.metadata,
         }, ensure_ascii=False, indent=2))
+
+    elif args.command == "ask":
+        # LangSmith tracing auto-enabled when LANGSMITH_TRACING_V2=true in .env
+        if args.stream:
+            # Streaming mode: print tokens as they arrive
+            import sys
+
+            pipeline = build_ask_pipeline(
+                use_qdrant=not args.no_qdrant,
+                use_reranker=args.rerank,
+                use_llm=not args.no_llm,
+            )
+
+            # Run query + retrieval first
+            processed_query = pipeline._run_query_processing(args.question)
+            retrieval_result = pipeline._run_retrieval(processed_query)
+
+            # Stream generation
+            chunk_gen, build_result = pipeline.answer_generator.generate_stream(retrieval_result)
+
+            full_text = ""
+            for chunk in chunk_gen:
+                full_text += chunk
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+
+            # Build final result with guardrails
+            answer_result = build_result(full_text)
+            result = pipeline._run_output_guardrails(answer_result, retrieval_result)
+
+            # Print metadata
+            if args.text:
+                source_url = result.citations[0].source_url if result.citations else ""
+                if source_url:
+                    print(f"\n\nNguồn: {source_url}")
+            else:
+                print("\n")
+                print(json.dumps({
+                    "question": result.question,
+                    "confidence": round(result.confidence, 4),
+                    "passages_used": result.passages_used,
+                }, ensure_ascii=False, indent=2))
+        else:
+            # Non-streaming mode
+            result = ask(
+                question=args.question,
+                use_qdrant=not args.no_qdrant,
+                use_reranker=args.rerank,
+                use_llm=not args.no_llm,
+            )
+
+            if args.text:
+                # User-friendly output: answer + 1 source
+                source_url = result.citations[0].source_url if result.citations else ""
+                print(result.answer)
+                if source_url:
+                    print(f"\nNguồn: {source_url}")
+            else:
+                # Full JSON output (for developers/API)
+                print(json.dumps({
+                    "question": result.question,
+                    "answer": result.answer,
+                    "citations": [
+                        {
+                            "claim": c.claim,
+                            "title": c.title,
+                            "source_url": c.source_url,
+                            "confidence": round(c.confidence, 4),
+                        }
+                        for c in result.citations
+                    ],
+                    "confidence": round(result.confidence, 4),
+                    "passages_used": result.passages_used,
+                    "metadata": result.metadata,
+                }, ensure_ascii=False, indent=2))
+
+    elif args.command == "eval":
+        from rag_pipeline.eval.runner import EvalRunner
+
+        # Build pipeline
+        eval_config = EvalConfig(eval_dataset_path=Path(args.dataset))
+        pipeline = build_generation_pipeline(
+            retrieval_pipeline=build_retrieval_pipeline(use_qdrant=not args.no_qdrant),
+            query_pipeline=build_query_pipeline(QueryConfig(), use_llm=True),
+        )
+
+        runner = EvalRunner(pipeline=pipeline, config=eval_config)
+        report = runner.run(limit=args.limit)
+
+        # Export report
+        report.print_summary()
+        report.to_json(Path(args.output))
+        report.to_markdown(Path(args.output).with_suffix(".md"))
+        print(f"\n📄 Report saved to: {args.output}")
 
     else:
         parser.print_help()

@@ -65,10 +65,51 @@ class RetrievalConfig:
     enable_rerank: bool = True
     rerank_provider: str = "cohere"  # "cohere" or "bge"
     rerank_model: str = "rerank-v3.5"
-    rerank_api_key_env: str = "COHERE_API_KEY"
+    api_key_env: str = "COHERE_API_KEY"
     rerank_top_k: int = 5
     # Score thresholds
     min_score: float = 0.0
+
+
+@dataclass(slots=True)
+class GenerationConfig:
+    """Configuration for Phase 4 answer generation."""
+    max_answer_tokens: int = 1024
+    temperature: float = 0.1
+    prompt_template: str = "vietnamese_rag"
+
+
+@dataclass(slots=True)
+class OutputGuardrailsConfig:
+    """Configuration for output guardrails (hallucination, safety, quality)."""
+    enable_hallucination_check: bool = True
+    enable_safety_check: bool = True
+    enable_quality_check: bool = True
+    min_answer_confidence: float = 0.3
+    min_citations: int = 1
+    max_answer_length: int = 2000
+
+
+@dataclass(slots=True)
+class LangSmithConfig:
+    """Configuration for LangSmith tracing."""
+    enabled: bool = False
+    api_key_env: str = "LANGSMITH_API_KEY"
+    project: str = "rag-pipeline"
+    endpoint: str = "https://apac.api.smith.langchain.com"
+
+
+@dataclass(slots=True)
+class EvalConfig:
+    """Configuration for RAGAS evaluation."""
+    eval_dataset_path: Path = Path("documents/eval.csv")
+    llm_model: str = "deepseek/deepseek-v4-flash"
+    llm_api_base: str = "https://openrouter.ai/api/v1"
+    llm_api_key_env: str = "OPENROUTER_API_KEY"
+    faithfulness_threshold: float = 0.8
+    answer_relevance_threshold: float = 0.7
+    context_precision_threshold: float = 0.7
+    context_recall_threshold: float = 0.6
 
 
 @dataclass(slots=True)

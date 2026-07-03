@@ -109,3 +109,27 @@ class RetrievalResult:
     passages: list[Passage]
     context: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class Citation:
+    """A citation linking an answer claim to a source passage."""
+
+    claim: str
+    chunk_id: str
+    doc_id: str
+    title: str
+    source_url: str = ""
+    confidence: float = 0.0
+
+
+@dataclass(slots=True)
+class AnswerResult:
+    """Final output of the RAG pipeline — Phase 4 generation."""
+
+    question: str
+    answer: str
+    citations: list[Citation] = field(default_factory=list)
+    confidence: float = 0.0
+    passages_used: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
