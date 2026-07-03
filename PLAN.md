@@ -293,6 +293,448 @@ class EvalConfig:
 
 ---
 
+## Phase 6: FastAPI Backend — CHƯA LÀM
+
+### Mục tiêu
+Tạo REST API + SSE streaming để frontend gọi RAG pipeline.
+
+### Architecture
+
+```
+Frontend (React)
+     │
+     │  fetch + ReadableStream (SSE)
+     ▼
+┌─────────────────┐
+│   FastAPI        │
+│   :8000          │
+├─────────────────┤
+│ POST /api/chat   │ → pipeline.ask() → AnswerResult (JSON)
+│ GET /api/chat/stream │ → StreamingResponse → tokens (SSE)
+│ GET /api/health  │ → status check
+│ POST /api/eval   │ → runner.run() → EvalReport
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  RAG Pipeline    │  (Phase 2→3→4, giữ nguyên code cũ)
+└─────────────────┘
+```
+
+### Streaming Flow (SSE + ReadableStream)
+
+```
+Client                          Server
+  │                               │
+  │  GET /api/chat/stream?q=...   │
+  │──────────────────────────────▶│
+  │                               │ pipeline.generate_stream()
+  │  data: "Xin"                  │
+  │◀──────────────────────────────│
+  │  data: "chào"                 │
+  │◀──────────────────────────────│
+  │  data: "bạn"                  │
+  │◀──────────────────────────────│
+  │  data: [DONE]                 │
+  │◀──────────────────────────────│
+  │                               │
+```
+
+### Files cần tạo
+
+```
+src/rag_pipeline/api/
+├── __init__.py
+├── app.py              # FastAPI app, CORS, lifespan
+├── routes/
+│   ├── __init__.py
+│   ├── chat.py         # POST /api/chat + GET /api/chat/stream (SSE)
+│   ├── eval.py         # POST /api/eval
+│   └── health.py       # GET /api/health
+└── schemas.py          # Pydantic request/response models
+```
+
+### Endpoints
+
+| Method | Path | Mô tả |
+|--------|------|-------|
+| `POST` | `/api/chat` | Gửi câu hỏi, nhận answer + citations (JSON) |
+| `GET` | `/api/chat/stream` | SSE streaming tokens real-time |
+| `GET` | `/api/health` | Health check + Qdrant status |
+| `POST` | `/api/eval` | Chạy evaluation |
+
+### Streaming Implementation
+
+```python
+# Backend (FastAPI)
+from fastapi.responses import StreamingResponse
+
+@app.get("/api/chat/stream")
+async def chat_stream(question: str):
+    async def generate():
+        pipeline = get_pipeline()
+        processed = pipeline._run_query_processing(question)
+        retrieval = pipeline._run_retrieval(processed)
+        chunk_gen, build_result = pipeline.answer_generator.generate_stream(retrieval)
+
+        for chunk in chunk_gen:
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+
+        result = build_result(full_text)
+        yield f"data: {json.dumps({'type': 'done', 'citations': [...]})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+```
+
+```javascript
+// Frontend (React)
+const response = await fetch(`/api/chat/stream?question=${question}`);
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const text = decoder.decode(value);
+  // Parse SSE format: "data: {...}\n\n"
+  const lines = text.split('\n').filter(l => l.startsWith('data: '));
+
+  for (const line of lines) {
+    const data = JSON.parse(line.slice(6));
+    if (data.type === 'token') {
+      appendToken(data.content);  // Hiển thị ngay
+    } else if (data.type === 'done') {
+      showCitations(data.citations);
+    }
+  }
+}
+```
+
+### Schemas (Pydantic)
+
+```python
+# Request
+class ChatRequest(BaseModel):
+    question: str
+    use_reranker: bool = False
+    use_llm: bool = True
+
+# Response (non-streaming)
+class CitationResponse(BaseModel):
+    claim: str
+    title: str
+    source_url: str
+    confidence: float
+
+class ChatResponse(BaseModel):
+    answer: str
+    citations: list[CitationResponse]
+    confidence: float
+    latency_ms: float
+
+# SSE Stream format
+# data: {"type": "token", "content": "Xin"}
+# data: {"type": "token", "content": "chào"}
+# data: {"type": "done", "citations": [...]}
+```
+
+### Dependencies
+
+```toml
+[project.optional-dependencies]
+api = ["fastapi>=0.115.0", "uvicorn[standard]>=0.34.0"]
+```
+
+### CLI
+
+```powershell
+# Chạy API server
+python -m rag_pipeline.api.app
+# Hoặc
+uvicorn rag_pipeline.api.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Tasks
+
+- [x] Tạo `api/schemas.py` — Pydantic models
+- [x] Tạo `api/app.py` — FastAPI app + CORS + lifespan
+- [x] Tạo `api/routes/health.py` — Health check
+- [x] Tạo `api/routes/chat.py` — POST /api/chat + SSE stream
+- [x] Tạo `api/routes/eval.py` — POST /api/eval
+- [x] Tests cho API endpoints (13 passed, 2 skipped)
+- [x] Update pyproject.toml
+
+---
+
+## Phase 7: React Frontend — CHƯA LÀM
+
+### Mục tiêu
+Tạo chat UI kết nối FastAPI backend qua SSE + ReadableStream.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────┐
+│              React App                   │
+│              (Vite + TypeScript)         │
+├─────────────────────────────────────────┤
+│  ┌───────────┐  ┌───────────────────┐   │
+│  │  Sidebar   │  │    ChatBox        │   │
+│  │  - History │  │  - Messages       │   │
+│  │  - Settings│  │  - Input          │   │
+│  │            │  │  - Citations      │   │
+│  └───────────┘  └───────────────────┘   │
+├─────────────────────────────────────────┤
+│  hooks/useChat.ts  (SSE streaming)      │
+│  api/client.ts     (fetch + ReadableStream) │
+└─────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Framework | React 19 + TypeScript |
+| Build tool | Vite 6 |
+| Styling | Tailwind CSS v4 |
+| HTTP client | fetch API + ReadableStream (built-in) |
+| Icons | Lucide React |
+
+### Streaming Logic (useChat hook)
+
+```typescript
+// hooks/useChat.ts
+const sendMessage = async (question: string) => {
+  // Add user message
+  setMessages(prev => [...prev, { role: 'user', content: question }]);
+
+  // Start streaming
+  const response = await fetch(`/api/chat/stream?question=${encodeURIComponent(question)}`);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  let botMessage = '';
+  setMessages(prev => [...prev, { role: 'bot', content: '', streaming: true }]);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const text = decoder.decode(value);
+    const lines = text.split('\n').filter(l => l.startsWith('data: '));
+
+    for (const line of lines) {
+      const data = JSON.parse(line.slice(6));
+      if (data.type === 'token') {
+        botMessage += data.content;
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'bot', content: botMessage, streaming: true };
+          return updated;
+        });
+      } else if (data.type === 'done') {
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: 'bot',
+            content: botMessage,
+            citations: data.citations,
+            streaming: false
+          };
+          return updated;
+        });
+      }
+    }
+  }
+};
+```
+
+### Files cần tạo
+
+```
+frontend/
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+├── tailwind.config.js
+├── postcss.config.js
+├── index.html
+├── public/
+└── src/
+    ├── main.tsx
+    ├── App.tsx
+    ├── index.css                 # Tailwind imports
+    ├── components/
+    │   ├── ChatBox.tsx           # Chat container + messages list
+    │   ├── MessageBubble.tsx     # Single message (user/bot)
+    │   ├── ChatInput.tsx         # Input + send button
+    │   ├── CitationCard.tsx      # Citation display
+    │   ├── Sidebar.tsx           # History + settings
+    │   └── Layout.tsx            # Main layout
+    ├── hooks/
+    │   └── useChat.ts            # Chat state + SSE streaming logic
+    ├── api/
+    │   └── client.ts             # fetch + ReadableStream wrapper
+    └── types/
+        └── index.ts              # TypeScript types
+```
+
+### Features
+
+**ChatBox:**
+- Hiển thị messages (user + bot)
+- Streaming text (token by token) via ReadableStream
+- Loading indicator khi chờ response
+- Auto scroll xuống cuối
+
+**MessageBubble:**
+- User message: right-aligned, blue
+- Bot message: left-aligned, gray
+- Markdown rendering
+- Citation links clickable
+
+**CitationCard:**
+- Hiển thị source URL
+- Claim text
+- Confidence score
+
+**Sidebar:**
+- Chat history (localStorage)
+- Settings (model, reranker toggle)
+- Clear history
+
+### Tasks
+
+- [ ] Init Vite + React + TypeScript project
+- [ ] Cài Tailwind CSS
+- [ ] Tạo `types/index.ts` — TypeScript types matching backend schemas
+- [ ] Tạo `api/client.ts` — fetch + ReadableStream wrapper
+- [ ] Tạo `hooks/useChat.ts` — Chat state + SSE streaming
+- [ ] Tạo `components/ChatInput.tsx` — Input component
+- [ ] Tạo `components/MessageBubble.tsx` — Message display
+- [ ] Tạo `components/CitationCard.tsx` — Citation display
+- [ ] Tạo `components/ChatBox.tsx` — Chat container
+- [ ] Tạo `components/Sidebar.tsx` — Sidebar
+- [ ] Tạo `components/Layout.tsx` — Main layout
+- [ ] Tạo `App.tsx` — Root component
+- [ ] Style với Tailwind CSS
+- [ ] Test kết nối với backend
+
+---
+
+## Phase 8: Docker + Deploy — CHƯA LÀM
+
+### Mục tiêu
+Dockerize toàn bộ stack để deploy lên VPS.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                    VPS                           │
+│                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ Frontend │  │ Backend  │  │  Qdrant  │      │
+│  │ (Nginx)  │  │ (FastAPI)│  │ (Docker) │      │
+│  │  :3000   │  │  :8000   │  │  :6333   │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+│       │             │             │             │
+│       └─────────────┼─────────────┘             │
+│                     │                           │
+│              docker-compose                     │
+└─────────────────────────────────────────────────┘
+```
+
+### Files cần tạo
+
+```
+Dockerfile                    # Backend (FastAPI)
+frontend/Dockerfile           # Frontend (React + Nginx)
+frontend/nginx.conf           # Nginx config (proxy → backend)
+docker-compose.yml            # Full stack
+docker-compose.prod.yml       # Production override
+```
+
+### docker-compose.yml
+
+```yaml
+services:
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: always
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - COHERE_API_KEY=${COHERE_API_KEY}
+      - QDRANT_URL=http://qdrant:6333
+      - LANGSMITH_TRACING_V2=${LANGSMITH_TRACING_V2}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+    depends_on:
+      - qdrant
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  qdrant_data:
+```
+
+### Deploy Flow
+
+```bash
+# 1. Clone repo trên VPS
+git clone <repo> && cd RAG
+
+# 2. Copy snapshot Qdrant vào
+cp /opt/qdrant/wikipedia_vi.snapshot .
+
+# 3. Tạo .env
+cp .env.example .env
+# Edit .env với API keys
+
+# 4. Build + start
+docker-compose up -d --build
+
+# 5. Import Qdrant data
+docker exec qdrant curl -X POST http://localhost:6333/collections/wikipedia_vi_chunks/snapshots/upload \
+  -F "snapshot=@/qdrant/storage/wikipedia_vi.snapshot"
+
+# 6. Truy cập
+# Frontend: http://vps-ip:3000
+# API: http://vps-ip:8000/docs
+```
+
+### Tasks
+
+- [ ] Tạo `Dockerfile` (backend)
+- [ ] Tạo `frontend/Dockerfile` (React + Nginx)
+- [ ] Tạo `frontend/nginx.conf` (proxy config)
+- [ ] Tạo `docker-compose.yml`
+- [ ] Tạo `docker-compose.prod.yml`
+- [ ] Test local với Docker
+- [ ] Document deploy steps
+
+---
+
 ## Tổng kết
 
 | Phase | Trạng thái | Mô tả |
@@ -302,6 +744,23 @@ class EvalConfig:
 | 3. Retrieval | ✅ Hoàn thành | Hybrid (dense + BM25) → RRF → Cohere re-rank |
 | 4. Orchestration + Generation | ✅ Hoàn thành | PromptBuilder + AnswerGenerator + OutputGuardrails + Streaming + CLI `ask` |
 | 5. Eval + Monitoring | ✅ Hoàn thành | LangSmith tracing + RAGAS eval (4 metrics) + Latency metrics (TTFT, P50/P90/P99) |
+| 6. FastAPI Backend | ✅ Hoàn thành | REST API + SSE streaming (ReadableStream) |
+| 7. React Frontend | ⬜ Chưa làm | Chat UI + SSE streaming + citations |
+| 8. Docker + Deploy | ⬜ Chưa làm | Dockerize + deploy VPS |
+
+## Tech Stack Summary
+
+| Layer | Technology |
+|-------|------------|
+| Backend | FastAPI + SSE (Server-Sent Events) |
+| Frontend | React 19 + Vite 6 + TypeScript + Tailwind v4 |
+| Streaming | SSE + ReadableStream (built-in browser API) |
+| Vector Store | Qdrant (Docker) |
+| LLM | OpenRouter (DeepSeek) |
+| Embedding | OpenRouter (NVIDIA Nemotron) |
+| Re-ranking | Cohere Rerank v3.5 |
+| Tracing | LangSmith |
+| Evaluation | RAGAS |
 
 ## Test Coverage
 
@@ -313,4 +772,5 @@ class EvalConfig:
 | Generation | 18 | Prompt builder, answer generator, output guardrails, pipeline |
 | Eval | 8 | EvalReport, EvalConfig, dataset loading |
 | Logging | 4 | LangSmith config, tracing integration |
-| **Total** | **96** | All tests pass ✅ |
+| API | 13 | Health, root, chat, stream, eval endpoints |
+| **Total** | **109** | All tests pass ✅ (2 skipped: ragas not installed) |
