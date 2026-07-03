@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 
 from rag_pipeline.generation.answer_generator import AnswerGenerator
 from rag_pipeline.generation.output_guardrails import OutputGuardrails
-from rag_pipeline.models import AnswerResult
+from rag_pipeline.models import AnswerResult, ProcessedQuery
 from rag_pipeline.pipelines.query_pipeline import QueryPipeline
 from rag_pipeline.pipelines.retrieval_pipeline import RetrievalPipeline
 
@@ -66,6 +67,23 @@ class AnswerPipeline:
     @_traceable("query_processing")
     def _run_query_processing(self, question: str):
         return self.query_pipeline.run(question, qid="ask")
+
+    def _run_query_processing_fast(self, question: str) -> ProcessedQuery:
+        """Fast query processing — skip LLM rewrite, use normalization only.
+
+        Saves ~4 seconds by not calling LLM for query reformulation.
+        """
+        normalized = self.query_pipeline.normalizer.normalize(question)
+        return ProcessedQuery(
+            qid=str(uuid.uuid4()),
+            original_query=question,
+            normalized_query=normalized.normalized_text,
+            rewrite_query=question,
+            bm25_query=normalized.normalized_text,
+            intent=normalized.intent,
+            filters=normalized.filters,
+            risk_flags=[],
+        )
 
     @_traceable("retrieval")
     def _run_retrieval(self, processed_query):

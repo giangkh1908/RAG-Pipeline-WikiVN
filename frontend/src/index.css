@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Safe area for mobile browsers */
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    overscroll-behavior: none;
+  }
+
+  /* Prevent iOS bounce */
+  #root {
+    height: 100dvh;
+  }
+}
+
+/* Hide scrollbar for suggestions */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

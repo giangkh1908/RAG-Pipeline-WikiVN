@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -17,51 +19,39 @@ from rag_pipeline.api.schemas import (
 
 router = APIRouter(tags=["chat"])
 
-# Lazy-loaded pipeline (initialized on first request)
+_executor = ThreadPoolExecutor(max_workers=4)
 _pipeline = None
 
 
 def _get_pipeline() -> Any:
-    """Get or create the RAG pipeline singleton."""
     global _pipeline
     if _pipeline is None:
         from rag_pipeline.main import build_ask_pipeline
-
         _pipeline = build_ask_pipeline()
     return _pipeline
 
 
 def _format_citations(result: Any) -> list[CitationResponse]:
-    """Convert AnswerResult citations to API response format."""
     return [
         CitationResponse(
-            claim=c.claim,
-            title=c.title,
-            source_url=c.source_url,
-            confidence=c.confidence,
+            doc_id=c.doc_id or "",
+            title=c.title or "Wikipedia",
+            url=c.source_url or "",
+            score=c.confidence,
         )
         for c in result.citations
     ]
 
 
-# ─── Non-streaming endpoint ─────────────────────────────────────────────────────
+# ─── Non-streaming ────────────────────────────────────────────────────────────
 
-@router.post("/api/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    """Ask a question and get a full answer with citations.
-
-    Args:
-        request: ChatRequest with question and options
-
-    Returns:
-        ChatResponse with answer, citations, confidence, and latency
-    """
     pipeline = _get_pipeline()
-
+    loop = asyncio.get_event_loop()
     start = time.perf_counter()
-    result = pipeline.ask(request.question)
+    result = await loop.run_in_executor(_executor, pipeline.ask, request.question)
     latency_ms = (time.perf_counter() - start) * 1000
-
     return ChatResponse(
         answer=result.answer,
         citations=_format_citations(result),
@@ -70,89 +60,91 @@ async def chat(request: ChatRequest) -> ChatResponse:
     )
 
 
-# ─── SSE streaming endpoint ─────────────────────────────────────────────────────
+# ─── SSE Streaming ───────────────────────────────────────────────────────────
 
-@router.get("/api/chat/stream")
+@router.get("/chat/stream")
 async def chat_stream(
-    question: str = Query(..., min_length=1, max_length=1000, description="User question"),
-    use_reranker: bool = Query(default=False, description="Use Cohere re-ranker"),
-    use_llm: bool = Query(default=True, description="Use LLM for query rewrite"),
+    question: str = Query(..., min_length=1, max_length=1000),
+    skip_rewrite: bool = Query(default=True, description="Skip LLM query rewrite for faster response"),
 ) -> StreamingResponse:
-    """Stream answer tokens via SSE (Server-Sent Events).
+    """Stream answer tokens via SSE.
 
-    Flow:
-    1. Query processing → ProcessedQuery
-    2. Retrieval → RetrievalResult
-    3. Streaming generation → yield tokens
-    4. Done signal with citations
-
-    SSE format:
-        data: {"type":"token","content":"Xin"}
-        data: {"type":"token","content":"chào"}
-        data: {"type":"done","answer":"Xin chào","citations":[...],"confidence":0.9}
-
-    Args:
-        question: User question (query param)
-        use_reranker: Use Cohere re-ranker
-        use_llm: Use LLM for query rewrite
-
-    Returns:
-        StreamingResponse with text/event-stream content type
+    - skip_rewrite=true (default): ~6-8s (retrieval + LLM)
+    - skip_rewrite=false: ~12-16s (full pipeline with query rewrite)
     """
     pipeline = _get_pipeline()
+    queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+    loop = asyncio.get_event_loop()
 
-    async def generate():
-        """Generate SSE stream of tokens."""
+    def _run():
         try:
-            # Step 1: Query processing
-            processed_query = pipeline._run_query_processing(question)
+            t0 = time.perf_counter()
 
-            # Step 2: Retrieval
-            retrieval_result = pipeline._run_retrieval(processed_query)
+            # Query processing
+            if skip_rewrite:
+                processed = pipeline._run_query_processing_fast(question)
+            else:
+                processed = pipeline._run_query_processing(question)
+            t1 = time.perf_counter()
+            print(f"[STREAM] Query: {(t1-t0)*1000:.0f}ms")
 
-            # Step 3: Streaming generation
-            chunk_gen, build_result = pipeline.answer_generator.generate_stream(retrieval_result)
+            # Retrieval
+            retrieval = pipeline._run_retrieval(processed)
+            t2 = time.perf_counter()
+            print(f"[STREAM] Retrieval: {(t2-t1)*1000:.0f}ms")
 
-            full_text = ""
+            # Stream tokens
+            chunk_gen, build_result = pipeline.answer_generator.generate_stream(retrieval)
+
+            full = ""
             for chunk in chunk_gen:
-                full_text += chunk
-                token_data = json.dumps({"type": "token", "content": chunk}, ensure_ascii=False)
-                yield f"data: {token_data}\n\n"
+                full += chunk
+                asyncio.run_coroutine_threadsafe(queue.put(("token", chunk)), loop)
 
-            # Step 4: Build final result with guardrails
-            answer_result = build_result(full_text)
-            checked_result = pipeline._run_output_guardrails(answer_result, retrieval_result)
+            t3 = time.perf_counter()
+            print(f"[STREAM] LLM: {(t3-t2)*1000:.0f}ms")
 
-            # Step 5: Send done signal with citations
-            done_data = json.dumps(
-                {
-                    "type": "done",
-                    "answer": checked_result.answer,
-                    "citations": [
-                        {
-                            "claim": c.claim,
-                            "title": c.title,
-                            "source_url": c.source_url,
-                            "confidence": round(c.confidence, 4),
-                        }
-                        for c in checked_result.citations
-                    ],
-                    "confidence": round(checked_result.confidence, 4),
-                },
-                ensure_ascii=False,
-            )
-            yield f"data: {done_data}\n\n"
+            # Build result + guardrails
+            result = build_result(full)
+            checked = pipeline._run_output_guardrails(result, retrieval)
+
+            print(f"[STREAM] Total: {(time.perf_counter()-t0)*1000:.0f}ms")
+
+            done = {
+                "type": "done",
+                "answer": checked.answer,
+                "citations": [
+                    {"doc_id": c.doc_id or "", "title": c.title or "Wikipedia",
+                     "url": c.source_url or "", "score": round(c.confidence, 4)}
+                    for c in checked.citations
+                ],
+                "confidence": round(checked.confidence, 4),
+            }
+            asyncio.run_coroutine_threadsafe(queue.put(("done", json.dumps(done, ensure_ascii=False))), loop)
 
         except Exception as e:
-            error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
-            yield f"data: {error_data}\n\n"
+            asyncio.run_coroutine_threadsafe(
+                queue.put(("error", json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False))),
+                loop,
+            )
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+    _executor.submit(_run)
+
+    async def generate():
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            etype, data = item
+            if etype == "token":
+                yield f"data: {json.dumps({'type': 'token', 'content': data}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {data}\n\n"
 
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

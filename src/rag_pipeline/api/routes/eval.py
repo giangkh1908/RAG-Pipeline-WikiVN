@@ -12,7 +12,7 @@ from rag_pipeline.api.schemas import EvalRequest, EvalResponse
 router = APIRouter(tags=["eval"])
 
 
-@router.post("/api/eval", response_model=EvalResponse)
+@router.post("/eval", response_model=EvalResponse)
 async def run_eval(request: EvalRequest) -> EvalResponse:
     """Run RAGAS evaluation on the pipeline.
 

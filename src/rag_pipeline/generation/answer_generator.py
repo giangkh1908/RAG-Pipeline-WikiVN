@@ -74,15 +74,18 @@ class AnswerGenerator:
     def generate_stream(self, retrieval_result: RetrievalResult) -> tuple[Generator[str, None, None], Any]:
         """Get streaming generator for answer.
 
+        Streaming uses plain text prompt (no JSON). Citations are built
+        from retrieval passages directly.
+
         Returns:
             Tuple of (chunk_generator, build_result_func).
             - chunk_generator: yields text chunks
             - build_result_func: call with accumulated text to get AnswerResult
         """
-        messages = self.prompt_builder.build(retrieval_result)
+        # Use streaming prompt (plain text, no JSON)
+        messages = self.prompt_builder.build_streaming(retrieval_result)
 
         if not isinstance(self.llm_client, OpenRouterLLMClient):
-            # Fallback to non-streaming
             result = self.generate(retrieval_result)
 
             def _fake_stream():
@@ -90,7 +93,6 @@ class AnswerGenerator:
 
             return _fake_stream(), lambda _: result
 
-        # Create stream generator
         chunk_gen = self.llm_client.stream(
             messages,
             max_tokens=self.config.max_answer_tokens,
@@ -98,23 +100,33 @@ class AnswerGenerator:
         )
 
         def build_result(full_text: str) -> AnswerResult:
-            """Build AnswerResult from accumulated stream text."""
-            try:
-                text = full_text.strip()
-                if text.startswith("```"):
-                    lines = text.split("\n")
-                    text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
-                response = json.loads(text)
-                return self._parse_response(response, retrieval_result)
-            except (json.JSONDecodeError, Exception):
-                return AnswerResult(
-                    question=retrieval_result.query.original_query,
-                    answer=full_text.strip(),
-                    citations=[],
-                    confidence=0.3,
-                    passages_used=len(retrieval_result.passages),
-                    metadata={"parse_mode": "stream_fallback"},
-                )
+            """Build AnswerResult from stream text + retrieval passages."""
+            # Build citations from passages used in generation
+            citations = []
+            for p in retrieval_result.passages[:5]:  # top 5 passages
+                if p.title:
+                    # Normalize score to [0, 1] (rerank_score can be > 1)
+                    raw_score = p.rerank_score or p.rrf_score or p.dense_score or 0.5
+                    score = min(max(raw_score, 0.0), 1.0)
+                    citations.append(
+                        Citation(
+                            claim="",
+                            chunk_id=p.chunk_id,
+                            doc_id=p.doc_id,
+                            title=p.title,
+                            source_url=p.source_url or "",
+                            confidence=score,
+                        )
+                    )
+
+            return AnswerResult(
+                question=retrieval_result.query.original_query,
+                answer=full_text.strip(),
+                citations=citations,
+                confidence=0.7,
+                passages_used=len(retrieval_result.passages),
+                metadata={"parse_mode": "streaming"},
+            )
 
         return chunk_gen, build_result
 

@@ -30,10 +30,10 @@ class EvalRequest(BaseModel):
 class CitationResponse(BaseModel):
     """Citation in chat response."""
 
-    claim: str = Field(..., description="Claim from the answer")
+    doc_id: str = Field(default="", description="Document ID")
     title: str = Field(..., description="Source article title")
-    source_url: str = Field(default="", description="Wikipedia URL")
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    url: str = Field(default="", description="Wikipedia URL")
+    score: float = Field(default=0.0, ge=0.0, le=1.0, description="Relevance score")
 
 
 class ChatResponse(BaseModel):

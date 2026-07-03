@@ -467,7 +467,7 @@ uvicorn rag_pipeline.api.app:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## Phase 7: React Frontend — CHƯA LÀM
+## Phase 7: React Frontend — ✅ HOÀN THÀNH
 
 ### Mục tiêu
 Tạo chat UI kết nối FastAPI backend qua SSE + ReadableStream.
@@ -606,20 +606,19 @@ frontend/
 
 ### Tasks
 
-- [ ] Init Vite + React + TypeScript project
-- [ ] Cài Tailwind CSS
-- [ ] Tạo `types/index.ts` — TypeScript types matching backend schemas
-- [ ] Tạo `api/client.ts` — fetch + ReadableStream wrapper
-- [ ] Tạo `hooks/useChat.ts` — Chat state + SSE streaming
-- [ ] Tạo `components/ChatInput.tsx` — Input component
-- [ ] Tạo `components/MessageBubble.tsx` — Message display
-- [ ] Tạo `components/CitationCard.tsx` — Citation display
-- [ ] Tạo `components/ChatBox.tsx` — Chat container
-- [ ] Tạo `components/Sidebar.tsx` — Sidebar
-- [ ] Tạo `components/Layout.tsx` — Main layout
-- [ ] Tạo `App.tsx` — Root component
-- [ ] Style với Tailwind CSS
-- [ ] Test kết nối với backend
+- [x] Init Vite + React 19 + TypeScript project
+- [x] Cài Tailwind CSS v4 (@tailwindcss/vite)
+- [x] Tạo `types/index.ts` — TypeScript types matching backend schemas
+- [x] Tạo `api/client.ts` — fetch + ReadableStream wrapper
+- [x] Tạo `hooks/useChat.ts` — Chat state + SSE streaming
+- [x] Tạo `components/ChatInput.tsx` — Input component
+- [x] Tạo `components/MessageBubble.tsx` — Message display
+- [x] Tạo `components/CitationCard.tsx` — Citation display
+- [x] Tạo `App.tsx` — Root component (gộp ChatBox + Layout)
+- [x] Style với Tailwind CSS
+- [x] Vite proxy → backend (dev mode)
+- [x] FastAPI serve frontend/dist (production)
+- [x] Build pass, TypeScript no errors
 
 ---
 

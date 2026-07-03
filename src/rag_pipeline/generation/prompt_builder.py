@@ -21,7 +21,7 @@ class PromptBuilder:
     config: GenerationConfig
 
     def build(self, retrieval_result: RetrievalResult) -> list[dict[str, str]]:
-        """Build chat messages for the LLM.
+        """Build chat messages for the LLM (structured JSON output).
 
         Args:
             retrieval_result: Output from Phase 3 retrieval
@@ -31,6 +31,18 @@ class PromptBuilder:
         """
         system_msg = self._build_system_message()
         user_msg = self._build_user_message(retrieval_result)
+        return [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ]
+
+    def build_streaming(self, retrieval_result: RetrievalResult) -> list[dict[str, str]]:
+        """Build chat messages for streaming (plain text output).
+
+        No JSON format — just answer text for natural token-by-token streaming.
+        """
+        system_msg = self._build_streaming_system_message()
+        user_msg = self._build_user_message_plain(retrieval_result)
         return [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
@@ -58,6 +70,27 @@ class PromptBuilder:
             f"NGỮ CẢNH:\n{passages_text}\n\n"
             f"CÂU HỎI: {question}\n\n"
             "Hãy trả lời dựa trên ngữ_context trên và trả về JSON."
+        )
+
+    def _build_streaming_system_message(self) -> str:
+        return (
+            "Bạn là trợ lý AI trả lời câu hỏi dựa trên ngữ cảnh được cung cấp.\n\n"
+            "QUY TẮC:\n"
+            "1. Chỉ trả lời dựa trên thông tin trong ngữ cảnh. "
+            "Nếu không đủ thông tin, nói rõ 'Tôi không tìm thấy thông tin đủ để trả lời'.\n"
+            "2. Trả lời bằng tiếng Việt, ngắn gọn và chính xác.\n"
+            "3. Trả lời trực tiếp bằng văn bản thường. KHÔNG trả về JSON.\n"
+            "4. Không thêm phần mở đầu như 'Dựa trên ngữ cảnh...' hay 'Theo thông tin...'. Trả lời thẳng vào câu hỏi."
+        )
+
+    def _build_user_message_plain(self, retrieval_result: RetrievalResult) -> str:
+        passages_text = self._format_passages(retrieval_result.passages)
+        question = retrieval_result.query.original_query
+
+        return (
+            f"NGỮ CẢNH:\n{passages_text}\n\n"
+            f"CÂU HỎI: {question}\n\n"
+            "Hãy trả lời câu hỏi trên dựa trên ngữ cảnh."
         )
 
     def _format_passages(self, passages: list) -> str:
