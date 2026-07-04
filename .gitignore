@@ -46,3 +46,7 @@ htmlcov/
 
 # Docker
 docker-compose.override.yml
+
+# Snapshots (large files)
+*.snapshot
+*.tar.gz

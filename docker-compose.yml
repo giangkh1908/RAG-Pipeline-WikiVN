@@ -13,7 +13,7 @@ services:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -22,9 +22,7 @@ services:
   # RAG API + Frontend
   # ============================================
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/giangkh1908/rag-pipeline-wikivn:latest
     container_name: rag-api
     ports:
       - "8000:8000"
