@@ -2,7 +2,7 @@
 
 Hỏi đáp dựa trên 1.1 triệu bài viết Wikipedia tiếng Việt, sử dụng RAG (Retrieval-Augmented Generation).
 
-🔗 **Demo:** http://103.82.25.191:8000
+🔗 **Demo:** https://wikivn.top
 
 ## Tech Stack
 
@@ -49,94 +49,24 @@ RAG/
 
 ## Deployment
 
-### Docker Image
+Production: **https://wikivn.top**
 
-Image được build tự động qua GitHub Actions và push lên GitHub Container Registry (GHCR):
+### Kiến trúc
 
 ```
-ghcr.io/giangkh1908/rag-pipeline-wikivn:latest
+User → Cloudflare (DNS + SSL) → Nginx → Docker (FastAPI + Qdrant)
 ```
 
-### Deploy lên VPS
+### Tech
 
-**1. Tạo SSH key và thêm secrets vào GitHub:**
+- **Docker**: Multi-stage build (Node frontend → Python runtime)
+- **CD**: GitHub Actions → GHCR → VPS auto-deploy
+- **Domain**: Cloudflare proxy + Let's Encrypt SSL
+- **Reverse proxy**: Nginx (SSE streaming support)
 
-```powershell
-# Tạo SSH key
-ssh-keygen -t ed25519 -f ~/.ssh/github_deploy
+**Auto deploy**: Push lên `main` → GitHub Actions tự build + deploy.
 
-# Copy public key lên VPS
-ssh-copy-id -i ~/.ssh/github_deploy.pub root@<vps-ip>
-```
-
-Thêm secrets vào GitHub (Settings → Secrets → Actions):
-- `VPS_HOST`: IP VPS
-- `VPS_USER`: root
-- `SSH_PRIVATE_KEY`: private key
-
-**2. Setup VPS (lần đầu):**
-
-```bash
-ssh root@<vps-ip>
-
-# Cài Docker
-curl -fsSL https://get.docker.com | sh
-
-# Tạo thư mục
-mkdir -p /opt/rag
-cd /opt/rag
-
-# Tải docker-compose.yml
-wget https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main/docker-compose.yml
-
-# Tạo .env
-nano .env
-```
-
-**3. Thêm API keys vào `.env`:**
-
-```env
-OPENROUTER_API_KEY=sk-or-v1-xxx
-QDRANT_URL=http://qdrant:6333
-COHERE_API_KEY=xxx
-```
-
-**4. Upload snapshot (4GB):**
-
-```bash
-# Từ máy local
-scp wikipedia_vi.snapshot root@<vps-ip>:/opt/rag/
-```
-
-**5. Start services:**
-
-```bash
-ssh root@<vps-ip>
-cd /opt/rag
-
-# Login GHCR
-echo "<github-token>" | docker login ghcr.io -u giangkh1908 --password-stdin
-
-# Start
-docker-compose up -d
-
-# Restore snapshot
-curl -X PUT http://localhost:6333/collections/wikipedia_vi_chunks \
-  -H "Content-Type: application/json" \
-  -d '{"vectors": {"dense": {"size": 2048, "distance": "Cosine"}}}'
-
-curl -X POST http://localhost:6333/collections/wikipedia_vi_chunks/snapshots/upload \
-  -F "snapshot=@/opt/rag/wikipedia_vi.snapshot"
-```
-
-**6. Truy cập:** `http://<vps-ip>:8000`
-
-### Auto Deploy (CD)
-
-Mỗi lần push lên `main`, GitHub Actions sẽ tự động:
-1. Build Docker image
-2. Push lên GHCR
-3. SSH vào VPS → pull image mới → restart containers
+📖 **Chi tiết**: [docs/deploy.md](docs/deploy.md)
 
 ---
 
@@ -145,7 +75,7 @@ Mỗi lần push lên `main`, GitHub Actions sẽ tự động:
 ### Bước 1: Clone & setup Python
 
 ```bash
-git clone https://github.com/giangkh1908/RAG-Pipeline-WikiVN.git
+git clone <repo-url>
 cd RAG-Pipeline-WikiVN
 
 # Tạo virtual environment
@@ -167,17 +97,17 @@ Tạo file `.env` trong thư mục gốc:
 
 ```env
 # Bắt buộc
-OPENROUTER_API_KEY=sk-or-v1-xxx
+OPENROUTER_API_KEY=<your-key>
 
 # Qdrant (mặc định: localhost:6333)
 QDRANT_URL=http://localhost:6333
 
 # Tùy chọn: Cohere re-ranking
-COHERE_API_KEY=xxx
+COHERE_API_KEY=<your-key>
 
 # Tùy chọn: LangSmith tracing
 LANGSMITH_TRACING_V2=true
-LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_API_KEY=<your-key>
 LANGSMITH_PROJECT=rag-pipeline
 LANGSMITH_ENDPOINT=https://apac.api.smith.langchain.com
 ```
@@ -296,6 +226,7 @@ python -m pytest tests/ -v -k "not eval"
 | File | Nội dung |
 |------|----------|
 | [PLAN.md](PLAN.md) | Kế hoạch dự án & tiến độ |
+| [docs/deploy.md](docs/deploy.md) | Deployment guide (Docker, VPS, SSL) |
 | [docs/api.md](docs/api.md) | API reference |
 | [docs/frontend.md](docs/frontend.md) | Frontend architecture |
 | [docs/generation.md](docs/generation.md) | Generation pipeline |

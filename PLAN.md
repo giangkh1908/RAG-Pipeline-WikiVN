@@ -627,24 +627,29 @@ frontend/
 ## Phase 8: Docker + Deploy — HOÀN THÀNH ✅
 
 ### Mục tiêu
-Dockerize toàn bộ stack để deploy lên VPS.
+Dockerize toàn bộ stack, setup CD pipeline, deploy lên VPS với domain + SSL.
+
+### Production URL
+🔗 **https://wikivn.top** — VPS <vps-ip>
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 Docker Compose                  │
-│                                                 │
-│  ┌──────────────────┐  ┌──────────┐             │
-│  │     API + UI     │  │  Qdrant  │             │
-│  │  (FastAPI + dist)│  │  :6333   │             │
-│  │      :8000       │  │          │             │
-│  └────────┬─────────┘  └────┬─────┘             │
-│           │                 │                   │
-│           └─────────────────┘                   │
-│                                                 │
-│  Frontend build → served by FastAPI static      │
-└─────────────────────────────────────────────────┘
+User → Cloudflare (DNS + SSL) → Nginx → Docker (FastAPI + Qdrant)
+```
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        VPS (<vps-ip>)                   │
+│                                                              │
+│  ┌─────────────┐    ┌─────────────────────────────────────┐  │
+│  │    Nginx     │    │          Docker Compose             │  │
+│  │  (port 443)  │    │  ┌──────────────┐  ┌────────────┐  │  │
+│  │              │───▶│  │   API + UI    │  │   Qdrant   │  │  │
+│  │  wikivn.top  │    │  │  (port 8000)  │  │  (6333)    │  │  │
+│  └─────────────┘    │  └──────────────┘  └────────────┘  │  │
+│                      └─────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Files
@@ -652,72 +657,50 @@ Dockerize toàn bộ stack để deploy lên VPS.
 ```
 Dockerfile                    # Multi-stage: Node build + Python serve
 .dockerignore                 # Exclude unnecessary files
-docker-compose.yml            # Full stack (Qdrant + API + Frontend)
+docker-compose.yml            # Full stack (Qdrant + API)
+.github/workflows/deploy.yml # GitHub Actions CD pipeline
 ```
 
-### docker-compose.yml
+### Docker Image
 
-```yaml
-services:
-  qdrant:
-    image: qdrant/qdrant:v1.13.6
-    container_name: rag-qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_storage:/qdrant/storage
-    environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+- Image: `ghcr.io/<owner>/rag-pipeline-wikivn:latest`
+- Multi-stage build: Node.js frontend builder → Python runtime
+- Layer caching: dependencies trước, source code sau
+- Non-root user (`appuser`) cho security
 
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: rag-api
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    restart: unless-stopped
+### CD Pipeline (GitHub Actions)
 
-volumes:
-  qdrant_storage:
-```
+Mỗi lần push lên `main`:
+1. Build Docker image (multi-stage, có cache)
+2. Push lên GitHub Container Registry (GHCR)
+3. SSH vào VPS → pull image mới → docker-compose up
 
-### Deploy Flow
+### Domain + SSL
 
-```bash
-# 1. Clone repo
-git clone <repo> && cd RAG
+- Domain: `wikivn.top` (Cloudflare DNS proxy)
+- SSL: Let's Encrypt (Certbot) + Cloudflare Edge Certificate
+- Cloudflare settings: Full SSL, TLS 1.3, Always HTTPS
+- Nginx reverse proxy với SSE streaming support
 
-# 2. Tạo .env
-cp .env.example .env
-# Edit .env với API keys
+### Qdrant Snapshot
 
-# 3. Build + start
-docker-compose up --build -d
-
-# 4. Truy cập
-# http://localhost:8000
-```
+- 433,500 vectors (1.1M chunks đã embed)
+- Snapshot ~4GB, upload qua `scp`, restore qua multipart form API
 
 ### Tasks
 
 - [x] Tạo `Dockerfile` (multi-stage: Node build + Python serve)
 - [x] Tạo `.dockerignore`
 - [x] Cập nhật `docker-compose.yml` (Qdrant + API)
-- [x] Cập nhật `README.md` với Docker instructions
+- [x] Tạo `.github/workflows/deploy.yml` (GitHub Actions CD)
+- [x] Deploy lên VPS (<vps-ip>)
+- [x] Restore Qdrant snapshot (433,500 vectors)
+- [x] Setup domain wikivn.top với Cloudflare
+- [x] Cài Nginx reverse proxy
+- [x] Setup SSL (Let's Encrypt + Cloudflare)
+- [x] Fix QDRANT_URL đọc từ env variable
+- [x] Tối ưu Docker layer caching
+- [x] Viết docs/deploy.md chi tiết
 
 ---
 
@@ -732,7 +715,7 @@ docker-compose up --build -d
 | 5. Eval + Monitoring | ✅ Hoàn thành | LangSmith tracing + RAGAS eval (4 metrics) + Latency metrics (TTFT, P50/P90/P99) |
 | 6. FastAPI Backend | ✅ Hoàn thành | REST API + SSE streaming (ReadableStream) |
 | 7. React Frontend | ✅ Hoàn thành | Chat UI + SSE streaming + citations + Responsive |
-| 8. Docker + Deploy | ✅ Hoàn thành | Docker Compose + GitHub Actions CD + GHCR |
+| 8. Docker + Deploy | ✅ Hoàn thành | Docker + GHCR + GitHub Actions CD + VPS + Domain + SSL |
 
 ## Tech Stack Summary
 

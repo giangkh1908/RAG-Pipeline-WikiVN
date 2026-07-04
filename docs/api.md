@@ -155,11 +155,11 @@ while (true) {
 
 ## CORS
 
-Allowed origins (development):
+Allowed origins:
 - `http://localhost:3000` — React dev server
 - `http://localhost:5173` — Vite dev server
-
-Production: cập nhật `allow_origins` trong `app.py`.
+- `https://<domain>` — Production domain
+- `https://www.<domain>` — Production domain (www)
 
 ## Architecture
 
