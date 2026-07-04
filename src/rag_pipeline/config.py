@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,7 +26,7 @@ class EmbeddingConfig:
 
 @dataclass(slots=True)
 class QdrantConfig:
-    url: str = "http://localhost:6333"
+    url: str = field(default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333"))
     collection_name: str = "wikipedia_vi_chunks"
     dense_vector_name: str = "dense"
     sparse_vector_name: str = "bm25"

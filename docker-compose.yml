@@ -13,10 +13,11 @@ services:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   # ============================================
   # RAG API + Frontend
