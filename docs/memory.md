@@ -114,7 +114,24 @@ class ChatRequest(BaseModel):
 
 File: `src/rag_pipeline/generation/prompt_builder.py`
 
-Hệ thống tự động cắt history để không vượt context window của LLM.
+Hệ thống quản lý history bằng 2 chiến lược: **Summarization** (khi history dài) + **Truncation** (khi vượt token budget).
+
+#### Strategy Overview
+
+```
+History <= 6 turns  →  Gửi full history (giống ChatGPT/Claude)
+History > 6 turns   →  Summarize older + giữ 2 turns gần nhất
+Vẫn vượt budget    →  Truncate từ cũ nhất
+```
+
+So sánh với ChatGPT/Claude:
+
+| Approach | ChatGPT | Claude | RAG v1 |
+|----------|---------|--------|--------|
+| Full history | Có (128K window) | Có (200K window) | Có (16K window) |
+| Summarization | Có (khi gần đầy) | Không | Có (khi > 6 turns) |
+| Truncation | Có (fallback) | Có | Có (fallback) |
+| Token budget | Tự động | Tự động | 16K (configurable) |
 
 #### Token Budget
 
@@ -127,11 +144,38 @@ max_context_tokens (16,000)
 └── History budget              (~9,100 tokens)
 ```
 
-#### Truncation Strategy
+#### Summarization (khi history dài)
+
+```python
+_SUMMARIZE_THRESHOLD = 6   # Summarize khi > 6 turns
+_KEEP_RECENT_TURNS = 2     # Giữ 2 turns gần nhất
+
+# Flow:
+# [turn1, turn2, turn3, turn4, turn5, turn6, turn7, turn8]
+# → [summary(turn1-6), turn7, turn8]
+```
+
+LLM tóm tắt older turns thành 2-3 câu, giữ lại thông tin quan trọng (chủ đề, entities, facts).
+
+```
+Input (6 turns):
+- User: Thủ đô Việt Nam ở đâu?
+- Asst: Thủ đô Việt Nam là Hà Nội.
+- User: Dân số bao nhiêu?
+- Asst: Dân số Hà Nội là 8,053,663.
+- User: Có thông tin năm 2025 ko?
+- Asst: Không tìm thấy thông tin năm 2025.
+
+Output (summary):
+"[Tóm tắt 6 lượt hội thoại trước: Người dùng hỏi về thủ đô Việt Nam (Hà Nội) và dân số Hà Nội (8,053,663 người). Không có thông tin dân số năm 2025.]"
+```
+
+#### Truncation (fallback)
+
+Nếu summarize không khả dụng hoặc vẫn vượt budget → truncate từ cũ nhất:
 
 ```python
 def _trim_history(self, history, system_msg, user_msg):
-    # Tính budget cho history
     reserved = estimate(system_msg) + estimate(user_msg) + RESERVED_RESPONSE
     history_budget = max_context_tokens - reserved
 
@@ -145,19 +189,8 @@ def _trim_history(self, history, system_msg, user_msg):
         total += turn_tokens
         keep_from = i
 
-    trimmed = history[keep_from:]
-
-    # Thêm marker nếu bị cắt
-    if len(trimmed) < len(history):
-        trimmed.insert(0, {
-            "role": "system",
-            "content": f"[Đã lược bỏ {dropped} lượt hội thoại cũ]"
-        })
-
-    return trimmed
+    return history[keep_from:]
 ```
-
-**Ưu tiên giữ turns gần nhất** — turns cũ bị drop trước.
 
 #### Token Estimation
 
@@ -166,6 +199,20 @@ _CHARS_PER_TOKEN = 4  # ~4 chars/token cho tiếng Việt + English
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // _CHARS_PER_TOKEN)
+```
+
+#### Configuration
+
+```python
+@dataclass
+class GenerationConfig:
+    max_context_tokens: int = 16_000  # Context window budget
+```
+
+PromptBuilder nhận `llm_client` để gọi LLM cho summarization:
+
+```python
+prompt_builder = PromptBuilder(gen_config, llm_client=llm_client)
 ```
 
 Ước tính rough nhưng đủ chính xác cho truncation. Sai lệch ±20% acceptable vì budget có margin.

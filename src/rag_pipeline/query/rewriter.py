@@ -12,22 +12,31 @@ REWRITE_PROMPT = """Bạn là trợ lý tìm kiếm Wikipedia tiếng Việt. Nh
 {history_section}Cho câu hỏi sau:
 "{query}"
 
-Trả về JSON với các trường:
-1. "normalized_query": Câu hỏi đã chuẩn hóa (lowercase, viết đầy đủ, không viết tắt). Nếu câu hỏi có đại từ mập mờ (nó, chúng, thành phố đó, người này...), hãy thay bằng danh từ cụ thể dựa trên ngữ cảnh hội thoại.
-2. "rewrite_query": Viết lại câu hỏi dưới dạng khác nhưng GIỮ NGUYÊN Ý NGHĨA. KHÔNG thêm câu trả lời vào câu hỏi. Chỉ viết lại cách diễn đạt, thêm từ đồng nghĩa nếu cần. Thay đại từ bằng danh từ cụ thể.
-3. "bm25_query": Chỉ giữ lại từ khóa chính, bỏ stopwords và câu hỏi. Ví dụ: "Thủ đô Việt Nam ở đâu?" → "thủ đô việt nam". Nếu có đại từ, thay bằng danh từ cụ thể.
-4. "intent": Loại câu hỏi - một trong: "definition", "person", "location", "time", "number", "history", "comparison", "general"
+QUY TẮC QUAN TRỌNG:
+- Nếu có ngữ cảnh hội thoại, câu hỏi hiện tại LUÔN liên quan đến chủ đề đang bàn.
+- Thay TẤT CẢ đại từ, tham chiếu mập mờ bằng danh từ cụ thể từ ngữ cảnh.
+- Nếu câu hỏi không nêu rõ chủ đề (ví dụ: "năm mới nhất", "bao nhiêu người", "thông tin đó"), hãy MẶC ĐỊNH nối tiếp chủ đề từ câu trước.
 
-Ví dụ:
-- "Thủ đô Việt Nam ở?" → normalized: "thủ đô việt nam ở đâu?", rewrite: "thủ đô của nước việt nam nằm ở đâu?", bm25: "thủ đô việt nam"
-- "Sơn Tùng là ai?" → normalized: "sơn tùng là ai?", rewrite: "ca sĩ sơn tùng có tiểu sử như thế nào?", bm25: "sơn tùng"
+Trả về JSON với các trường:
+1. "normalized_query": Câu hỏi đã chuẩn hóa. Thay đại từ bằng danh từ cụ thể. Ví dụ: "có thông tin năm mới nhất ko?" khi đang bàn về Việt Nam → "có thông tin dân số việt nam năm mới nhất ko?"
+2. "rewrite_query": Viết lại câu hỏi đầy đủ, rõ ràng. Thêm chủ đề từ ngữ cảnh nếu câu hỏi thiếu. KHÔNG thêm câu trả lời.
+3. "bm25_query": Từ khóa chính để tìm kiếm. LUÔN bao gồm chủ đề chính từ ngữ cảnh. Ví dụ: "năm mới nhất là bao nhiêu" khi đang bàn Việt Nam → "dân số việt nam năm 2024 2025"
+4. "intent": "definition" | "person" | "location" | "time" | "number" | "history" | "comparison" | "general"
+
+Ví dụ có ngữ cảnh:
+Ngữ cảnh: Người dùng hỏi về Việt Nam, trợ lý trả lời về dân số Việt Nam.
+Câu hỏi: "có thông tin năm mới nhất là bao nhiêu người ko?"
+→ normalized: "dân số việt nam năm mới nhất là bao nhiêu người?"
+→ rewrite: "dân số việt nam năm mới nhất là bao nhiêu?"
+→ bm25: "dân số việt nam năm 2024 2025"
+→ intent: "number"
 
 Chỉ trả về JSON, không giải thích."""
 
-HISTORY_SECTION = """Ngữ cảnh hội thoại trước đó:
+HISTORY_SECTION = """Ngữ cảnh hội thoại (đang bàn về chủ đề này):
 {history}
 
-Dựa vào ngữ cảnh trên, hãy hiểu rõ các đại từ và tham chiếu trong câu hỏi hiện tại.
+→ Câu hỏi hiện tại tiếp nối chủ đề trên. Thay đại từ/tham chiếu bằng danh từ cụ thể.
 
 """
 

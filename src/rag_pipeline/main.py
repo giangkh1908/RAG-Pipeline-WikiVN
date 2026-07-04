@@ -297,7 +297,7 @@ def build_generation_pipeline(
     else:
         llm_client = OpenRouterLLMClient(llm_config)
 
-    prompt_builder = PromptBuilder(gen_config)
+    prompt_builder = PromptBuilder(gen_config, llm_client=llm_client)
     answer_generator = AnswerGenerator(
         llm_client=llm_client,
         prompt_builder=prompt_builder,

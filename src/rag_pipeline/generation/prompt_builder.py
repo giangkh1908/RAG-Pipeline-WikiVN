@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from rag_pipeline.config import GenerationConfig
 from rag_pipeline.models import RetrievalResult
@@ -19,6 +20,16 @@ _RESERVED_PASSAGES = 4_000   # retrieved passages
 _RESERVED_QUESTION = 300     # user question + formatting
 _RESERVED_RESPONSE = 2_000   # expected LLM response
 
+# Summarization thresholds
+_SUMMARIZE_THRESHOLD = 6     # Summarize when history > N turns
+_KEEP_RECENT_TURNS = 2       # Keep last N turns as-is when summarizing
+
+SUMMARIZE_PROMPT = """Tóm tắt cuộc hội thoại sau thành 2-3 câu ngắn gọn, giữ lại thông tin quan trọng (chủ đề, facts, entities):
+
+{history}
+
+Chỉ trả về text tóm tắt, không giải thích."""
+
 
 def _estimate_tokens(text: str) -> int:
     """Rough token count estimation."""
@@ -34,11 +45,13 @@ class PromptBuilder:
     - Cite sources using [1], [2]... numbering
     - Return structured JSON with answer and citations
 
-    Supports conversation history with token-budget-based truncation
-    to stay within the LLM's context window.
+    Supports conversation history with:
+    - Token-budget-based truncation (always active)
+    - Summarization of older turns when history is long (optional, needs LLM)
     """
 
     config: GenerationConfig
+    llm_client: Any = None  # Optional LLM client for summarization
 
     @property
     def max_context_tokens(self) -> int:
@@ -60,9 +73,9 @@ class PromptBuilder:
         """
         system_msg = self._build_system_message()
         user_msg = self._build_user_message(retrieval_result)
-        trimmed_history = self._trim_history(history, system_msg, user_msg)
+        processed_history = self._process_history(history, system_msg, user_msg)
         messages: list[dict[str, str]] = [{"role": "system", "content": system_msg}]
-        messages.extend(trimmed_history)
+        messages.extend(processed_history)
         messages.append({"role": "user", "content": user_msg})
         return messages
 
@@ -77,15 +90,91 @@ class PromptBuilder:
         """
         system_msg = self._build_streaming_system_message()
         user_msg = self._build_user_message_plain(retrieval_result)
-        trimmed_history = self._trim_history(history, system_msg, user_msg)
+        processed_history = self._process_history(history, system_msg, user_msg)
         messages: list[dict[str, str]] = [{"role": "system", "content": system_msg}]
-        messages.extend(trimmed_history)
+        messages.extend(processed_history)
         messages.append({"role": "user", "content": user_msg})
         return messages
 
-    def _trim_history(
+    def _process_history(
         self,
         history: list[dict[str, str]] | None,
+        system_msg: str,
+        user_msg: str,
+    ) -> list[dict[str, str]]:
+        """Process history: summarize if long, then trim to fit token budget.
+
+        Strategy:
+        1. If history <= threshold: send full history
+        2. If history > threshold: summarize older turns + keep recent turns
+        3. Always: trim to fit token budget
+        """
+        if not history:
+            return []
+
+        # Step 1: Summarize if history is long
+        if len(history) > _SUMMARIZE_THRESHOLD and self.llm_client is not None:
+            processed = self._summarize_and_keep_recent(history)
+        else:
+            processed = list(history)
+
+        # Step 2: Trim to fit token budget
+        return self._trim_history(processed, system_msg, user_msg)
+
+    def _summarize_and_keep_recent(
+        self,
+        history: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """Summarize older turns, keep recent turns as-is.
+
+        Example:
+            Input:  [turn1, turn2, turn3, turn4, turn5, turn6, turn7, turn8]
+            Output: [summary_turn, turn7, turn8]
+        """
+        # Split: older turns to summarize + recent turns to keep
+        split_at = len(history) - _KEEP_RECENT_TURNS
+        older_turns = history[:split_at]
+        recent_turns = history[split_at:]
+
+        # Summarize older turns
+        summary_text = self._call_llm_summarize(older_turns)
+
+        # Build result: summary as system message + recent turns
+        result: list[dict[str, str]] = []
+        if summary_text:
+            result.append({
+                "role": "system",
+                "content": f"[Tóm tắt {len(older_turns)} lượt hội thoại trước: {summary_text}]",
+            })
+        result.extend(recent_turns)
+        return result
+
+    def _call_llm_summarize(self, turns: list[dict[str, str]]) -> str:
+        """Call LLM to summarize conversation turns."""
+        if not self.llm_client:
+            return ""
+
+        # Format turns for summarization
+        lines: list[str] = []
+        for turn in turns:
+            role = "Người dùng" if turn["role"] == "user" else "Trợ lý"
+            # Truncate long messages for summarization
+            content = turn["content"][:500]
+            lines.append(f"{role}: {content}")
+        history_text = "\n".join(lines)
+
+        prompt = SUMMARIZE_PROMPT.format(history=history_text)
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            return self.llm_client.chat(messages, max_tokens=200, temperature=0.3)
+        except Exception:
+            # Fallback: return empty (will use truncation instead)
+            return ""
+
+    def _trim_history(
+        self,
+        history: list[dict[str, str]],
         system_msg: str,
         user_msg: str,
     ) -> list[dict[str, str]]:
@@ -119,10 +208,13 @@ class PromptBuilder:
 
         # If we dropped turns, add a summary marker so LLM knows context was truncated
         if len(trimmed) < len(history) and trimmed:
-            trimmed.insert(0, {
-                "role": "system",
-                "content": f"[Đã lược bỏ {len(history) - len(trimmed)} lượt hội thoại cũ để tiết kiệm ngữ cảnh]",
-            })
+            dropped = len(history) - len(trimmed)
+            # Check if first item is already a summary
+            if not trimmed[0].get("content", "").startswith("[Tóm tắt"):
+                trimmed.insert(0, {
+                    "role": "system",
+                    "content": f"[Đã lược bỏ {dropped} lượt hội thoại cũ để tiết kiệm ngữ cảnh]",
+                })
 
         return trimmed
 
