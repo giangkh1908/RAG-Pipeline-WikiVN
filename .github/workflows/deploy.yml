@@ -55,12 +55,27 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            # Create directory if not exists
+            mkdir -p /opt/rag
             cd /opt/rag
+
+            # Download docker-compose.yml if not exists
+            if [ ! -f docker-compose.yml ]; then
+              wget -q https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main/docker-compose.yml
+            fi
+
+            # Create .env if not exists
+            if [ ! -f .env ]; then
+              echo "OPENROUTER_API_KEY=your-key-here" > .env
+              echo "QDRANT_URL=http://qdrant:6333" >> .env
+              echo "COHERE_API_KEY=your-key-here" >> .env
+              echo "Please edit /opt/rag/.env with your API keys"
+            fi
 
             # Login GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Pull only changed layers
+            # Pull image
             docker pull ${{ env.IMAGE_NAME }}:latest
 
             # Restart
