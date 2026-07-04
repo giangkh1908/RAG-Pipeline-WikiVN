@@ -231,6 +231,41 @@ python -m pytest tests/ -v -k "not eval"
 | [docs/generation.md](docs/generation.md) | Generation pipeline |
 | [docs/eval.md](docs/eval.md) | Evaluation metrics |
 
+## Docker
+
+Chạy toàn bộ hệ thống với Docker Compose (Qdrant + API + Frontend).
+
+### Build & Run
+
+```bash
+# Tạo file .env từ mẫu
+cp .env.example .env
+# Sửa .env với API keys của bạn
+
+# Build và start
+docker-compose up --build -d
+
+# Xem logs
+docker-compose logs -f api
+
+# Dừng
+docker-compose down
+```
+
+Truy cập: `http://localhost:8000`
+
+### Chỉ dùng Qdrant (phát triển local)
+
+```bash
+# Chỉ start Qdrant
+docker-compose up -d qdrant
+
+# Chạy backend + frontend như bình thường
+python -m rag_pipeline.api.app
+```
+
+---
+
 ## License
 
 MIT

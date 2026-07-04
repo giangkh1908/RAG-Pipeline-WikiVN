@@ -624,7 +624,7 @@ frontend/
 
 ---
 
-## Phase 8: Docker + Deploy — CHƯA LÀM
+## Phase 8: Docker + Deploy — HOÀN THÀNH ✅
 
 ### Mục tiêu
 Dockerize toàn bộ stack để deploy lên VPS.
@@ -633,28 +633,26 @@ Dockerize toàn bộ stack để deploy lên VPS.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                    VPS                           │
+│                 Docker Compose                  │
 │                                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │ Frontend │  │ Backend  │  │  Qdrant  │      │
-│  │ (Nginx)  │  │ (FastAPI)│  │ (Docker) │      │
-│  │  :3000   │  │  :8000   │  │  :6333   │      │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
-│       │             │             │             │
-│       └─────────────┼─────────────┘             │
-│                     │                           │
-│              docker-compose                     │
+│  ┌──────────────────┐  ┌──────────┐             │
+│  │     API + UI     │  │  Qdrant  │             │
+│  │  (FastAPI + dist)│  │  :6333   │             │
+│  │      :8000       │  │          │             │
+│  └────────┬─────────┘  └────┬─────┘             │
+│           │                 │                   │
+│           └─────────────────┘                   │
+│                                                 │
+│  Frontend build → served by FastAPI static      │
 └─────────────────────────────────────────────────┘
 ```
 
-### Files cần tạo
+### Files
 
 ```
-Dockerfile                    # Backend (FastAPI)
-frontend/Dockerfile           # Frontend (React + Nginx)
-frontend/nginx.conf           # Nginx config (proxy → backend)
-docker-compose.yml            # Full stack
-docker-compose.prod.yml       # Production override
+Dockerfile                    # Multi-stage: Node build + Python serve
+.dockerignore                 # Exclude unnecessary files
+docker-compose.yml            # Full stack (Qdrant + API + Frontend)
 ```
 
 ### docker-compose.yml
@@ -662,77 +660,64 @@ docker-compose.prod.yml       # Production override
 ```yaml
 services:
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:v1.13.6
+    container_name: rag-qdrant
     ports:
       - "6333:6333"
     volumes:
-      - qdrant_data:/qdrant/storage
-    restart: always
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: rag-api
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - COHERE_API_KEY=${COHERE_API_KEY}
       - QDRANT_URL=http://qdrant:6333
-      - LANGSMITH_TRACING_V2=${LANGSMITH_TRACING_V2}
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
     depends_on:
-      - qdrant
-    restart: always
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
-    depends_on:
-      - api
-    restart: always
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  qdrant_data:
+  qdrant_storage:
 ```
 
 ### Deploy Flow
 
 ```bash
-# 1. Clone repo trên VPS
+# 1. Clone repo
 git clone <repo> && cd RAG
 
-# 2. Copy snapshot Qdrant vào
-cp /opt/qdrant/wikipedia_vi.snapshot .
-
-# 3. Tạo .env
+# 2. Tạo .env
 cp .env.example .env
 # Edit .env với API keys
 
-# 4. Build + start
-docker-compose up -d --build
+# 3. Build + start
+docker-compose up --build -d
 
-# 5. Import Qdrant data
-docker exec qdrant curl -X POST http://localhost:6333/collections/wikipedia_vi_chunks/snapshots/upload \
-  -F "snapshot=@/qdrant/storage/wikipedia_vi.snapshot"
-
-# 6. Truy cập
-# Frontend: http://vps-ip:3000
-# API: http://vps-ip:8000/docs
+# 4. Truy cập
+# http://localhost:8000
 ```
 
 ### Tasks
 
-- [ ] Tạo `Dockerfile` (backend)
-- [ ] Tạo `frontend/Dockerfile` (React + Nginx)
-- [ ] Tạo `frontend/nginx.conf` (proxy config)
-- [ ] Tạo `docker-compose.yml`
-- [ ] Tạo `docker-compose.prod.yml`
-- [ ] Test local với Docker
-- [ ] Document deploy steps
+- [x] Tạo `Dockerfile` (multi-stage: Node build + Python serve)
+- [x] Tạo `.dockerignore`
+- [x] Cập nhật `docker-compose.yml` (Qdrant + API)
+- [x] Cập nhật `README.md` với Docker instructions
 
 ---
 
@@ -746,8 +731,8 @@ docker exec qdrant curl -X POST http://localhost:6333/collections/wikipedia_vi_c
 | 4. Orchestration + Generation | ✅ Hoàn thành | PromptBuilder + AnswerGenerator + OutputGuardrails + Streaming + CLI `ask` |
 | 5. Eval + Monitoring | ✅ Hoàn thành | LangSmith tracing + RAGAS eval (4 metrics) + Latency metrics (TTFT, P50/P90/P99) |
 | 6. FastAPI Backend | ✅ Hoàn thành | REST API + SSE streaming (ReadableStream) |
-| 7. React Frontend | ⬜ Chưa làm | Chat UI + SSE streaming + citations |
-| 8. Docker + Deploy | ⬜ Chưa làm | Dockerize + deploy VPS |
+| 7. React Frontend | ✅ Hoàn thành | Chat UI + SSE streaming + citations + Responsive |
+| 8. Docker + Deploy | ✅ Hoàn thành | Docker Compose (Qdrant + API + Frontend) |
 
 ## Tech Stack Summary
 
