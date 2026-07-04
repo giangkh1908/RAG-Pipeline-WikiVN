@@ -732,14 +732,14 @@ docker-compose up --build -d
 | 5. Eval + Monitoring | ✅ Hoàn thành | LangSmith tracing + RAGAS eval (4 metrics) + Latency metrics (TTFT, P50/P90/P99) |
 | 6. FastAPI Backend | ✅ Hoàn thành | REST API + SSE streaming (ReadableStream) |
 | 7. React Frontend | ✅ Hoàn thành | Chat UI + SSE streaming + citations + Responsive |
-| 8. Docker + Deploy | ✅ Hoàn thành | Docker Compose (Qdrant + API + Frontend) |
+| 8. Docker + Deploy | ✅ Hoàn thành | Docker Compose + GitHub Actions CD + GHCR |
 
 ## Tech Stack Summary
 
 | Layer | Technology |
 |-------|------------|
 | Backend | FastAPI + SSE (Server-Sent Events) |
-| Frontend | React 19 + Vite 6 + TypeScript + Tailwind v4 |
+| Frontend | React 19 + Vite 8 + TypeScript + Tailwind v4 |
 | Streaming | SSE + ReadableStream (built-in browser API) |
 | Vector Store | Qdrant (Docker) |
 | LLM | OpenRouter (DeepSeek) |

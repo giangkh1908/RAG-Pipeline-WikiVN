@@ -1,122 +1,74 @@
-# Frontend — React Chat Interface
+# Frontend Architecture
 
-React 19 chat UI kết nối FastAPI backend qua SSE streaming. Responsive cho mobile.
+React 19 + Vite 8 + Tailwind CSS v4
 
-## Tech Stack
-
-- React 19 + TypeScript
-- Vite 6 (dev server + build)
-- Tailwind CSS v4
-- ReadableStream API (SSE consumption)
-
-## Structure
+## Cấu trúc
 
 ```
 frontend/
 ├── src/
 │   ├── api/
-│   │   └── client.ts         # fetch + ReadableStream wrapper
+│   │   └── client.ts       # SSE streaming client
 │   ├── components/
-│   │   ├── ChatInput.tsx      # Input + suggestions + send button
-│   │   ├── CitationCard.tsx   # Numbered source tag [1] [2]
-│   │   └── MessageBubble.tsx  # User bubble / Assistant text
+│   │   ├── ChatInput.tsx    # Input + suggestions
+│   │   ├── MessageBubble.tsx # User/Assistant bubbles
+│   │   └── CitationCard.tsx # Source citations
 │   ├── hooks/
-│   │   └── useChat.ts         # Chat state + SSE streaming
-│   ├── types/
-│   │   └── index.ts           # TypeScript interfaces
-│   ├── App.tsx                # Root layout
-│   ├── main.tsx               # Entry point
-│   └── index.css              # Tailwind + scrollbar-hide
-├── package.json
-├── vite.config.ts             # Tailwind plugin + API proxy
-└── tsconfig.json
+│   │   └── useChat.ts      # Chat state management
+│   ├── types.ts            # TypeScript types
+│   ├── App.tsx             # Main layout
+│   ├── main.tsx            # Entry point
+│   └── index.css           # Tailwind + custom styles
+├── index.html
+├── vite.config.ts
+└── package.json
 ```
-
-## Development
-
-```bash
-cd frontend
-npm install
-npm run dev        # → http://localhost:5173
-```
-
-Vite proxy tự chuyển `/api/*` → `http://localhost:8000` (không cần CORS).
-
-## Build + Serve
-
-```bash
-# Build frontend
-cd frontend && npm run build
-
-# Start FastAPI (tự serve frontend/dist nếu tồn tại)
-python -m rag_pipeline.api.app
-# → http://localhost:8000
-```
-
-## Responsive Design
-
-Mobile-first, hoạt động tốt trên mọi kích thước:
-
-| Breakpoint | Changes |
-|------------|---------|
-| `< 640px` (mobile) | Suggestions horizontal scroll, input full-width, compact padding |
-| `≥ 640px` (tablet+) | Suggestions wrap + center, larger padding |
-
-**Mobile optimizations:**
-- `h-[100dvh]` — full viewport, tránh browser bar
-- `overscroll-behavior: none` — bỏ bounce iOS
-- `-webkit-tap-highlight-color: transparent` — bỏ highlight xanh
-- `active:bg-gray-100` — touch feedback
-- `.scrollbar-hide` — ẩn scrollbar cho suggestions
 
 ## Components
 
 ### ChatInput
-- Auto-expanding textarea (tối đa 160px)
-- Nút gửi hình mũi tên (như ChatGPT)
-- Spinner khi đang loading
-- Gợi ý câu hỏi (click để gửi)
-- Horizontal scroll trên mobile, wrap trên desktop
+- Auto-expanding textarea
+- Horizontal scroll suggestions (mobile)
+- Arrow send button with loading spinner
 
 ### MessageBubble
-- **User**: bubble xám, căn phải (như iMessage)
-- **Assistant**: text trần, căn trái (như ChatGPT/Claude)
-- Streaming: 3 dấu chấm nhảy khi chờ, cursor nhấp nháy khi đang stream
+- User: gray bubble, right-aligned (iMessage style)
+- Assistant: plain text, left-aligned (ChatGPT style)
+- Streaming indicator while loading
 
 ### CitationCard
-- Tag nhỏ có số [1] [2] [3]
-- Tên bài viết Wikipedia
-- Click mở link trong tab mới
+- Numbered source tags [1] [2] [3]
+- Wikipedia links
+- Confidence scores
 
-## SSE Streaming Flow
+## SSE Streaming
 
-```
-User types question
-    ↓
-useChat.sendMessage()
-    ↓
-fetch /api/chat/stream?question=...
-    ↓
-ReadableStream reads SSE events
-    ↓
-onEvent({type:'token', content:'...'}) → append to message
-onEvent({type:'done', citations:[...]}) → show sources
+Client kết nối đến `/api/chat/stream?question=...` và nhận events:
+
+```typescript
+// Token event
+{ type: "token", content: "Hello" }
+
+// Done event
+{ type: "done", answer: "...", citations: [...], confidence: 0.8 }
 ```
 
-## Key Files
+## Responsive Design
 
-### `api/client.ts`
-- `chat(question)` — POST, returns full response
-- `chatStream(question, onEvent)` — GET SSE, calls onEvent per stream event
-- `healthCheck()` — GET /api/health
+| Breakpoint | Width | Layout |
+|------------|-------|--------|
+| Mobile | < 640px | Horizontal scroll suggestions |
+| Tablet | 640-1024px | Wrap suggestions |
+| Desktop | > 1024px | Max-width 768px centered |
 
-### `hooks/useChat.ts`
-- `messages` — Message[] state
-- `isStreaming` — boolean
-- `sendMessage(question)` — triggers SSE stream
-- `clearMessages()` — reset chat
+## Build
 
-### `types/index.ts`
-- `Message` — {id, role, content, citations?, confidence?, isStreaming?}
-- `StreamEvent` — StreamToken | StreamDone | StreamError
-- `Citation` — {doc_id, title, url, score}
+```bash
+# Development
+npm run dev    # → http://localhost:5173
+
+# Production
+npm run build  # → dist/
+```
+
+Production build được serve bởi FastAPI (không cần Nginx).
