@@ -27,11 +27,21 @@ frontend/dist
 # Docs
 docs
 *.md
+LICENSE
 
 # Data (mount at runtime)
 data
 *.csv
 *.parquet
+*.snapshot
 
 # Tests
 tests
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+
+# GitHub
+.github
