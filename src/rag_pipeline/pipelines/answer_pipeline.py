@@ -55,13 +55,13 @@ class AnswerPipeline:
         Returns:
             AnswerResult with answer, citations, and confidence
         """
-        # Step 1: Query processing (Phase 2)
-        processed_query = self._run_query_processing(question)
+        # Step 1: Query processing (Phase 2) — with history for pronoun resolution
+        processed_query = self._run_query_processing(question, history=history)
 
         # Step 2: Retrieval (Phase 3)
         retrieval_result = self._run_retrieval(processed_query)
 
-        # Step 3: Generation (Phase 4)
+        # Step 3: Generation (Phase 4) — with history for context-aware answer
         answer_result = self._run_generation(retrieval_result, history=history)
 
         # Step 4: Output guardrails
@@ -70,8 +70,8 @@ class AnswerPipeline:
         return checked_result
 
     @_traceable("query_processing")
-    def _run_query_processing(self, question: str):
-        return self.query_pipeline.run(question, qid="ask")
+    def _run_query_processing(self, question: str, history=None):
+        return self.query_pipeline.run(question, qid="ask", history=history)
 
     def _run_query_processing_fast(self, question: str) -> ProcessedQuery:
         """Fast query processing — skip LLM rewrite, use normalization only.

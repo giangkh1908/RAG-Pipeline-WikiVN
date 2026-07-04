@@ -1,6 +1,8 @@
-# API Reference — FastAPI Backend
+# API Reference — FastAPI Backend (v1)
 
 Backend HTTP + SSE cho RAG Pipeline. React frontend kết nối qua API này.
+
+> **v1**: API gọi LLM trực tiếp, single-turn hoặc multi-turn với client-side history.
 
 ## Quick Start
 

@@ -1,6 +1,8 @@
-# Ingest Pipeline
+# Ingest Pipeline (v1)
 
 Pipeline index dữ liệu Wikipedia tiếng Việt (JSONL) vào Qdrant với embedding từ OpenRouter.
+
+> **v1**: Batch ingest 1.1M docs, single embedding model, Qdrant vector store.
 
 ---
 

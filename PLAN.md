@@ -1,6 +1,8 @@
-# PLAN.md — RAG Pipeline
+# PLAN.md — RAG Pipeline v1
 
 Dự án RAG (Retrieval-Augmented Generation) cho Wikipedia tiếng Việt.
+
+> **v1**: Gọi LLM trực tiếp, luồng đi duy nhất (query → retrieve → generate). Không có tool calling, agent, hay MCP.
 
 ---
 
@@ -10,7 +12,7 @@ Dự án RAG (Retrieval-Augmented Generation) cho Wikipedia tiếng Việt.
 - Vector store: Qdrant chạy trên Docker (ổ D, mount volume)
 - Hardware: Intel Ultra 5 245H (14C/14T), 16GB RAM
 - Embedding: OpenRouter API → nvidia/llama-nemotron-embed-vl-1b-v2:free (2048-dim)
-- LLM: OpenRouter API → meta-llama/llama-3.2-3b-instruct:free
+- LLM: OpenRouter API → deepseek/deepseek-v4-flash
 
 ---
 
@@ -701,6 +703,9 @@ Mỗi lần push lên `main`:
 - [x] Fix QDRANT_URL đọc từ env variable
 - [x] Tối ưu Docker layer caching
 - [x] Viết docs/deploy.md chi tiết
+- [x] Conversation memory (client-side history, context window management)
+- [x] Query rewriting with context (pronoun resolution)
+- [x] Viết docs/memory.md chi tiết
 
 ---
 
@@ -716,6 +721,7 @@ Mỗi lần push lên `main`:
 | 6. FastAPI Backend | ✅ Hoàn thành | REST API + SSE streaming (ReadableStream) |
 | 7. React Frontend | ✅ Hoàn thành | Chat UI + SSE streaming + citations + Responsive |
 | 8. Docker + Deploy | ✅ Hoàn thành | Docker + GHCR + GitHub Actions CD + VPS + Domain + SSL |
+| 9. Memory | ✅ Hoàn thành | Conversation memory + context window + query rewriting with context |
 
 ## Tech Stack Summary
 
@@ -741,5 +747,54 @@ Mỗi lần push lên `main`:
 | Generation | 18 | Prompt builder, answer generator, output guardrails, pipeline |
 | Eval | 8 | EvalReport, EvalConfig, dataset loading |
 | Logging | 4 | LangSmith config, tracing integration |
-| API | 13 | Health, root, chat, stream, eval endpoints |
-| **Total** | **109** | All tests pass ✅ (2 skipped: ragas not installed) |
+| API | 17 | Health, root, chat, chat with history, stream, stream with history, eval |
+| **Total** | **113** | All tests pass ✅ (2 skipped: ragas not installed) |
+
+---
+
+## RAG v2 — Roadmap
+
+> v2 mở rộng từ v1 (gọi LLM trực tiếp) sang kiến trúc Agent-based.
+
+### Hướng phát triển
+
+| Feature | Mô tả |
+|---------|-------|
+| **Tool Calling** | LLM gọi tools (search, calculator, SQL, API...) thay vì chỉ generate text |
+| **MCP (Model Context Protocol)** | Chuẩn giao thức để connect LLM với external data sources |
+| **Agent Orchestration** | Multi-step reasoning, planning, self-correction |
+| **Multi-source Retrieval** | Không chỉ Wikipedia — thêm SQL, API, web search |
+| **Memory Server-side** | Lưu conversation vào DB, persist across sessions |
+
+### Kiến trúc v2 (dự kiến)
+
+```
+User Query
+    │
+    ▼
+┌─────────────┐
+│   Agent      │ ← LLM quyết định gọi tool nào
+│  (planner)   │
+└──────┬──────┘
+       │
+       ├── Tool: Wikipedia Search (RAG v1)
+       ├── Tool: SQL Query
+       ├── Tool: Web Search
+       ├── Tool: Calculator
+       └── Tool: MCP Server
+       │
+       ▼
+┌─────────────┐
+│  Synthesizer │ ← Tổng hợp kết quả từ nhiều tools
+│  (generator) │
+└─────────────┘
+       │
+       ▼
+    Answer
+```
+
+### Tại sao tách v1/v2?
+
+- **v1** đơn giản, dễ debug, đủ cho Wikipedia Q&A
+- **v2** phức tạp hơn, cần architecture riêng
+- v1 là foundation — v2 build trên v1 (reuse retrieval, embedding, vector store)

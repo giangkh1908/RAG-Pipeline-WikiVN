@@ -27,8 +27,19 @@ class QueryPipeline:
     guardrails: QueryGuardrails
     rewriter: QueryRewriter | None = None
 
-    def run(self, query: str, qid: str = "") -> ProcessedQuery:
-        """Process a query through the full pipeline."""
+    def run(
+        self,
+        query: str,
+        qid: str = "",
+        history: list[dict[str, str]] | None = None,
+    ) -> ProcessedQuery:
+        """Process a query through the full pipeline.
+
+        Args:
+            query: Current user question
+            qid: Query ID
+            history: Optional conversation history for context-aware rewriting
+        """
         # Step 1: Guardrails
         risk_flags: list[str] = []
         if self.config.enable_guardrails:
@@ -40,7 +51,7 @@ class QueryPipeline:
 
         # Step 3: LLM Rewrite (if enabled and rewriter available)
         if self.config.enable_rewrite and self.rewriter is not None:
-            rewrite_result = self.rewriter.rewrite(query)
+            rewrite_result = self.rewriter.rewrite(query, history=history)
             return ProcessedQuery(
                 qid=qid,
                 original_query=query,

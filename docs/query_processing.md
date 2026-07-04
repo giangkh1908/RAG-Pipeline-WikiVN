@@ -1,6 +1,8 @@
-# Query Processing Pipeline (Phase 2)
+# Query Processing Pipeline (Phase 2) — v1
 
 ## Tổng quan
+
+> **v1**: Normalize → Guardrails → LLM rewrite (với conversation context cho pronoun resolution).
 
 Xử lý user query trước khi retrieval: normalize → guardrails → rewrite → output `ProcessedQuery`.
 

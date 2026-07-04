@@ -1,6 +1,8 @@
-# Retrieval Pipeline (Phase 3)
+# Retrieval Pipeline (Phase 3) — v1
 
 ## Tổng quan
+
+> **v1**: Hybrid search (dense + BM25) → RRF fusion → Cohere re-rank. Single query, không có multi-step.
 
 Hybrid search (dense + BM25) → RRF fusion → Cohere re-rank → top-k results.
 

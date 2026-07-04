@@ -1,6 +1,8 @@
-# Deployment Guide
+# Deployment Guide (v1)
 
 Hướng dẫn deploy RAG Pipeline lên VPS với Docker, domain, và SSL.
+
+> **v1**: Docker Compose (Qdrant + API), GitHub Actions CD, Nginx + Cloudflare SSL.
 
 ## Tổng quan kiến trúc
 

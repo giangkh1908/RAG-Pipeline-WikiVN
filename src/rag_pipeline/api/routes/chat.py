@@ -82,8 +82,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         try:
             t0 = time.perf_counter()
 
-            # Query processing (fast mode — skip LLM rewrite)
-            processed = pipeline._run_query_processing_fast(question)
+            # Query processing: full rewrite when history present (for pronoun resolution),
+            # fast mode when no history (skip LLM rewrite for speed)
+            if history:
+                processed = pipeline._run_query_processing(question, history=history)
+            else:
+                processed = pipeline._run_query_processing_fast(question)
             t1 = time.perf_counter()
             print(f"[STREAM] Query: {(t1-t0)*1000:.0f}ms")
 

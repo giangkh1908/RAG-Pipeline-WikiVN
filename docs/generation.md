@@ -1,8 +1,10 @@
-# Generation Pipeline (Phase 4)
+# Generation Pipeline (Phase 4) — v1
 
 ## Overview
 
 Phase 4 adds the **answer generation** layer on top of the existing retrieval pipeline. It takes `RetrievalResult` (from Phase 3) and produces a structured `AnswerResult` with citations, confidence scores, and output guardrail checks.
+
+> **v1**: Gọi LLM trực tiếp (OpenRouter API). V2 sẽ dùng tool calling + agent orchestration.
 
 ## Architecture
 

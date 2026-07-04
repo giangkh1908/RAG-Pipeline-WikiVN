@@ -1,6 +1,8 @@
-# Frontend Architecture
+# Frontend Architecture (v1)
 
 React 19 + Vite 8 + Tailwind CSS v4
+
+> **v1**: Chat UI kết nối backend qua SSE streaming. Client-side conversation memory.
 
 ## Cấu trúc
 

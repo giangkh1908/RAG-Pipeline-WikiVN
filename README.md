@@ -1,6 +1,9 @@
-# RAG Pipeline — Vietnamese Wikipedia
+# RAG Pipeline v1 — Vietnamese Wikipedia
 
 Hỏi đáp dựa trên 1.1 triệu bài viết Wikipedia tiếng Việt, sử dụng RAG (Retrieval-Augmented Generation).
+
+> **v1** — Gọi LLM trực tiếp, luồng đi duy nhất (query → retrieve → generate).\
+> **v2 (planned)** — Tool calling, MCP, Agent orchestration.
 
 🔗 **Demo:** https://wikivn.top
 
@@ -231,7 +234,10 @@ python -m pytest tests/ -v -k "not eval"
 | [docs/api.md](docs/api.md) | API reference |
 | [docs/frontend.md](docs/frontend.md) | Frontend architecture |
 | [docs/generation.md](docs/generation.md) | Generation pipeline |
-| [docs/eval.md](docs/eval.md) | Evaluation metrics |
+| [docs/retrieval.md](docs/retrieval.md) | Retrieval pipeline (hybrid search + re-ranking) |
+| [docs/query_processing.md](docs/query_processing.md) | Query processing (normalize + rewrite) |
+| [docs/ingest_pipeline.md](docs/ingest_pipeline.md) | Ingest pipeline (Wikipedia → Qdrant) |
+| [docs/eval.md](docs/eval.md) | Evaluation metrics (RAGAS) |
 
 ---
 

@@ -1,6 +1,8 @@
-# Evaluation Pipeline (Phase 5)
+# Evaluation Pipeline (Phase 5) — v1
 
 ## Overview
+
+> **v1**: RAGAS metrics + LangSmith tracing. Đánh giá offline trên eval dataset.
 
 Phase 5 adds **RAGAS evaluation** to measure RAG pipeline quality. It runs the full pipeline (Phase 2→3→4) on a set of eval questions, then scores the results using 4 RAGAS metrics + latency metrics (TTFT, total latency).
 

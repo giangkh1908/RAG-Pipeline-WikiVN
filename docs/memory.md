@@ -1,6 +1,8 @@
-# Conversation Memory
+# Conversation Memory (v1)
 
 Hệ thống hỗ trợ multi-turn chat — LLM hiểu context từ lịch sử hội thoại trước đó.
+
+> **v1**: Client-side history, LLM trực tiếp resolve context. V2 sẽ dùng Agent + server-side memory.
 
 ## Vấn đề
 
@@ -287,15 +289,93 @@ const clearMessages = useCallback(() => {
 
 Xóa messages = xóa history. Turns tiếp theo không có context trước đó.
 
+## Query Rewriting with Context
+
+History không chỉ dùng cho generation — còn dùng để **rewrite query trước khi retrieval**.
+
+### Vấn đề
+
+```
+User: "Thủ đô Việt Nam ở đâu?"
+Bot:  "Thủ đô Việt Nam là Hà Nội."
+
+User: "Dân số chúng là bao nhiêu?"
+→ BM25 search: "dân số chúng bao nhiêu"  ← không có "Việt Nam"
+→ Retrieval sai: trả về kết quả về "Tam Quốc", "Chư Thành"
+```
+
+### Giải pháp
+
+Khi có history, query rewriter dùng LLM để resolve đại từ:
+
+```
+History: "Thủ đô Việt Nam ở đâu?" → "Hà Nội"
+Question: "Dân số chúng là bao nhiêu?"
+→ LLM rewrite: "Dân số Việt Nam là bao nhiêu?"
+→ BM25 search: "dân số việt nam"  ← đúng!
+```
+
+### Flow
+
+```
+Question + History
+    │
+    ▼
+QueryRewriter.rewrite(query, history)
+    │
+    ├── Nếu có history → LLM rewrite với context
+    │   Prompt: "Ngữ cảnh: ...\nCâu hỏi: ..."
+    │   → Resolve đại từ, expand abbreviations
+    │
+    └── Nếu không có history → Fast path (skip rewrite)
+        → Tiết kiệm ~4s
+    │
+    ▼
+ProcessedQuery (rewrite_query, bm25_query)
+    │
+    ▼
+Retrieval (dense + BM25 với query đã resolve)
+```
+
+### Implementation
+
+File: `src/rag_pipeline/query/rewriter.py`
+
+```python
+REWRITE_PROMPT = """...
+{history_section}Cho câu hỏi sau:
+"{query}"
+
+1. "normalized_query": ... Thay đại từ mập mờ bằng danh từ cụ thể dựa trên ngữ cảnh.
+2. "rewrite_query": ... Thay đại từ bằng danh từ cụ thể.
+3. "bm25_query": ... Nếu có đại từ, thay bằng danh từ cụ thể.
+..."""
+
+def rewrite(self, query: str, history: list[dict] | None = None) -> RewriteResult:
+    history_section = self._format_history(history)
+    prompt = REWRITE_PROMPT.format(query=query, history_section=history_section)
+    ...
+```
+
+### Behavior
+
+| Scenario | Rewrite | Thời gian |
+|----------|---------|-----------|
+| Không có history | Skip (fast path) | ~0ms |
+| Có history, câu đơn giản | LLM rewrite | ~4s |
+| Có history, có đại từ | LLM resolve + rewrite | ~4s |
+
+**Trade-off**: Chậm hơn ~4s khi có history, nhưng retrieval chính xác hơn nhiều.
+
 ## Limitations
 
 1. **Client-side only** — History nằm trong React state, reload page = mất history
-2. **No pronoun resolution** — LLM tự suy luận "nó", "thành phố đó" từ context, không guarantee chính xác 100%
-3. **Token estimation** — ~4 chars/token là ước tính, có thể sai ±20%
-4. **No server-side sessions** — Không lưu conversation trên server
+2. **Token estimation** — ~4 chars/token là ước tính, có thể sai ±20%
+3. **No server-side sessions** — Không lưu conversation trên server
+4. **LLM rewrite latency** — Thêm ~4s khi có history (đổi lấy accuracy)
 
 ## Future Improvements
 
 - **Server-side sessions**: Lưu conversation theo `conversation_id`, frontend chỉ cần gửi ID
-- **Query rewriting with context**: Tự động resolve pronouns trước khi retrieval
 - **Persistent memory**: Lưu conversations vào database cho users đã đăng nhập
+- **Smarter fast path**: Detect đại từ bằng regex, chỉ gọi LLM rewrite khi cần
