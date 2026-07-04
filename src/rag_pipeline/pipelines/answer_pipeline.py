@@ -41,11 +41,16 @@ class AnswerPipeline:
     output_guardrails: OutputGuardrails
 
     @_traceable("answer_pipeline.ask")
-    def ask(self, question: str) -> AnswerResult:
+    def ask(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> AnswerResult:
         """Run full RAG pipeline: question → answer with citations.
 
         Args:
             question: User question in natural language
+            history: Optional conversation history [{role, content}, ...]
 
         Returns:
             AnswerResult with answer, citations, and confidence
@@ -57,7 +62,7 @@ class AnswerPipeline:
         retrieval_result = self._run_retrieval(processed_query)
 
         # Step 3: Generation (Phase 4)
-        answer_result = self._run_generation(retrieval_result)
+        answer_result = self._run_generation(retrieval_result, history=history)
 
         # Step 4: Output guardrails
         checked_result = self._run_output_guardrails(answer_result, retrieval_result)
@@ -90,8 +95,8 @@ class AnswerPipeline:
         return self.retrieval_pipeline.run(processed_query)
 
     @_traceable("generation")
-    def _run_generation(self, retrieval_result):
-        return self.answer_generator.generate(retrieval_result)
+    def _run_generation(self, retrieval_result, history=None):
+        return self.answer_generator.generate(retrieval_result, history=history)
 
     @_traceable("output_guardrails")
     def _run_output_guardrails(self, answer_result, retrieval_result):

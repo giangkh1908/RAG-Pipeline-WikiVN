@@ -80,26 +80,49 @@ class TestChatEndpoint:
         response = client.post("/api/chat", json={})
         assert response.status_code == 422
 
+    def test_chat_with_history(self, client):
+        response = client.post("/api/chat", json={
+            "question": "Dân số bao nhiêu?",
+            "history": [
+                {"role": "user", "content": "Thủ đô Việt Nam ở đâu?"},
+                {"role": "assistant", "content": "Thủ đô Việt Nam là Hà Nội."},
+            ],
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert "answer" in data
+
 
 class TestChatStreamEndpoint:
-    """Tests for GET /api/chat/stream."""
+    """Tests for POST /api/chat/stream."""
 
     def test_stream_returns_200(self, client):
-        response = client.get("/api/chat/stream?question=Test")
+        response = client.post("/api/chat/stream", json={"question": "Test"})
         assert response.status_code == 200
 
     def test_stream_content_type(self, client):
-        response = client.get("/api/chat/stream?question=Test")
+        response = client.post("/api/chat/stream", json={"question": "Test"})
         assert "text/event-stream" in response.headers["content-type"]
 
     def test_stream_has_data(self, client):
-        response = client.get("/api/chat/stream?question=Test")
+        response = client.post("/api/chat/stream", json={"question": "Test"})
         content = response.text
         assert "data:" in content
 
     def test_stream_empty_question_rejected(self, client):
-        response = client.get("/api/chat/stream?question=")
+        response = client.post("/api/chat/stream", json={"question": ""})
         assert response.status_code == 422
+
+    def test_stream_with_history(self, client):
+        response = client.post("/api/chat/stream", json={
+            "question": "Dân số bao nhiêu?",
+            "history": [
+                {"role": "user", "content": "Thủ đô Việt Nam ở đâu?"},
+                {"role": "assistant", "content": "Thủ đô Việt Nam là Hà Nội."},
+            ],
+        })
+        assert response.status_code == 200
+        assert "data:" in response.text
 
 
 class TestEvalEndpoint:

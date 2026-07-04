@@ -9,10 +9,18 @@ from pydantic import BaseModel, Field
 
 # ─── Request ────────────────────────────────────────────────────────────────────
 
+class ChatHistoryEntry(BaseModel):
+    """A single turn in conversation history."""
+
+    role: Literal["user", "assistant"] = Field(..., description="Message role")
+    content: str = Field(..., min_length=1, max_length=2000, description="Message content")
+
+
 class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
 
     question: str = Field(..., min_length=1, max_length=1000, description="User question")
+    history: list[ChatHistoryEntry] = Field(default_factory=list, description="Conversation history (last N turns)")
     use_reranker: bool = Field(default=False, description="Use Cohere re-ranker")
     use_llm: bool = Field(default=True, description="Use LLM for query rewrite")
 

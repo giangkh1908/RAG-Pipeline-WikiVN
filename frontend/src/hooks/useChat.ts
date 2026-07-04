@@ -1,9 +1,24 @@
 import { useState, useCallback } from 'react';
-import type { Message, StreamEvent } from '../types';
+import type { ChatHistoryEntry, Message, StreamEvent } from '../types';
 import { chatStream } from '../api/client';
 
 let msgId = 0;
 const nextId = () => `msg-${++msgId}`;
+
+const MAX_HISTORY_TURNS = 5;
+
+function extractHistory(messages: Message[]): ChatHistoryEntry[] {
+  // Take last N completed turns (user + assistant pairs)
+  const completed = messages.filter(m => !m.isStreaming);
+  const history: ChatHistoryEntry[] = [];
+  for (const m of completed) {
+    if (m.role === 'user' || (m.role === 'assistant' && m.content)) {
+      history.push({ role: m.role, content: m.content });
+    }
+  }
+  // Limit to last MAX_HISTORY_TURNS * 2 entries (user + assistant per turn)
+  return history.slice(-(MAX_HISTORY_TURNS * 2));
+}
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,6 +37,9 @@ export function useChat() {
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
+
+    // Extract history from previous messages (before adding new ones)
+    const history = extractHistory(messages);
 
     try {
       await chatStream(question, (event: StreamEvent) => {
@@ -47,7 +65,7 @@ export function useChat() {
             ),
           );
         }
-      });
+      }, history);
     } catch {
       setMessages(prev =>
         prev.map(m =>
@@ -59,7 +77,7 @@ export function useChat() {
     } finally {
       setIsStreaming(false);
     }
-  }, [isStreaming]);
+  }, [isStreaming, messages]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);

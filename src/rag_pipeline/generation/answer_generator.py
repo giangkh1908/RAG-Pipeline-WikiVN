@@ -28,16 +28,21 @@ class AnswerGenerator:
     prompt_builder: PromptBuilder
     config: GenerationConfig
 
-    def generate(self, retrieval_result: RetrievalResult) -> AnswerResult:
+    def generate(
+        self,
+        retrieval_result: RetrievalResult,
+        history: list[dict[str, str]] | None = None,
+    ) -> AnswerResult:
         """Generate an answer from retrieval result.
 
         Args:
             retrieval_result: Output from Phase 3 retrieval
+            history: Optional conversation history
 
         Returns:
             AnswerResult with answer, citations, and confidence
         """
-        messages = self.prompt_builder.build(retrieval_result)
+        messages = self.prompt_builder.build(retrieval_result, history=history)
 
         try:
             response = self.llm_client.chat_json(
@@ -71,7 +76,11 @@ class AnswerGenerator:
                 metadata={"parse_mode": "fallback_text"},
             )
 
-    def generate_stream(self, retrieval_result: RetrievalResult) -> tuple[Generator[str, None, None], Any]:
+    def generate_stream(
+        self,
+        retrieval_result: RetrievalResult,
+        history: list[dict[str, str]] | None = None,
+    ) -> tuple[Generator[str, None, None], Any]:
         """Get streaming generator for answer.
 
         Streaming uses plain text prompt (no JSON). Citations are built
@@ -83,7 +92,7 @@ class AnswerGenerator:
             - build_result_func: call with accumulated text to get AnswerResult
         """
         # Use streaming prompt (plain text, no JSON)
-        messages = self.prompt_builder.build_streaming(retrieval_result)
+        messages = self.prompt_builder.build_streaming(retrieval_result, history=history)
 
         if not isinstance(self.llm_client, OpenRouterLLMClient):
             result = self.generate(retrieval_result)

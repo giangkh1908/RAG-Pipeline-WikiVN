@@ -5,6 +5,11 @@ export interface Citation {
   score: number;
 }
 
+export interface ChatHistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ChatResponse {
   answer: string;
   citations: Citation[];

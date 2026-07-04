@@ -78,6 +78,7 @@ class GenerationConfig:
     max_answer_tokens: int = 1024
     temperature: float = 0.1
     prompt_template: str = "vietnamese_rag"
+    max_context_tokens: int = 16_000  # LLM context window budget
 
 
 @dataclass(slots=True)

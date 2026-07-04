@@ -1,12 +1,15 @@
-import type { ChatResponse, StreamEvent } from '../types';
+import type { ChatHistoryEntry, ChatResponse, StreamEvent } from '../types';
 
 const API_BASE = '';
 
-export async function chat(question: string): Promise<ChatResponse> {
+export async function chat(
+  question: string,
+  history: ChatHistoryEntry[] = [],
+): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, history }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -15,9 +18,13 @@ export async function chat(question: string): Promise<ChatResponse> {
 export async function chatStream(
   question: string,
   onEvent: (event: StreamEvent) => void,
+  history: ChatHistoryEntry[] = [],
 ): Promise<void> {
-  const params = new URLSearchParams({ question });
-  const res = await fetch(`${API_BASE}/api/chat/stream?${params}`);
+  const res = await fetch(`${API_BASE}/api/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, history }),
+  });
 
   if (!res.ok) throw new Error(`API error: ${res.status}`);
 

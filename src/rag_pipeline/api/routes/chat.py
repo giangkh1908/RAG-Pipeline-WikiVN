@@ -8,10 +8,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from rag_pipeline.api.schemas import (
+    ChatHistoryEntry,
     ChatRequest,
     ChatResponse,
     CitationResponse,
@@ -50,7 +51,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
     pipeline = _get_pipeline()
     loop = asyncio.get_event_loop()
     start = time.perf_counter()
-    result = await loop.run_in_executor(_executor, pipeline.ask, request.question)
+    history = [{"role": h.role, "content": h.content} for h in request.history]
+    result = await loop.run_in_executor(
+        _executor, pipeline.ask, request.question, history
+    )
     latency_ms = (time.perf_counter() - start) * 1000
     return ChatResponse(
         answer=result.answer,
@@ -62,29 +66,24 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 # ─── SSE Streaming ───────────────────────────────────────────────────────────
 
-@router.get("/chat/stream")
-async def chat_stream(
-    question: str = Query(..., min_length=1, max_length=1000),
-    skip_rewrite: bool = Query(default=True, description="Skip LLM query rewrite for faster response"),
-) -> StreamingResponse:
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Stream answer tokens via SSE.
 
-    - skip_rewrite=true (default): ~6-8s (retrieval + LLM)
-    - skip_rewrite=false: ~12-16s (full pipeline with query rewrite)
+    Accepts question + conversation history via POST body.
     """
     pipeline = _get_pipeline()
     queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
     loop = asyncio.get_event_loop()
+    question = request.question
+    history = [{"role": h.role, "content": h.content} for h in request.history]
 
     def _run():
         try:
             t0 = time.perf_counter()
 
-            # Query processing
-            if skip_rewrite:
-                processed = pipeline._run_query_processing_fast(question)
-            else:
-                processed = pipeline._run_query_processing(question)
+            # Query processing (fast mode — skip LLM rewrite)
+            processed = pipeline._run_query_processing_fast(question)
             t1 = time.perf_counter()
             print(f"[STREAM] Query: {(t1-t0)*1000:.0f}ms")
 
@@ -93,8 +92,10 @@ async def chat_stream(
             t2 = time.perf_counter()
             print(f"[STREAM] Retrieval: {(t2-t1)*1000:.0f}ms")
 
-            # Stream tokens
-            chunk_gen, build_result = pipeline.answer_generator.generate_stream(retrieval)
+            # Stream tokens (with history)
+            chunk_gen, build_result = pipeline.answer_generator.generate_stream(
+                retrieval, history=history
+            )
 
             full = ""
             for chunk in chunk_gen:

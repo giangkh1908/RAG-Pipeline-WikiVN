@@ -227,6 +227,7 @@ python -m pytest tests/ -v -k "not eval"
 |------|----------|
 | [PLAN.md](PLAN.md) | Kế hoạch dự án & tiến độ |
 | [docs/deploy.md](docs/deploy.md) | Deployment guide (Docker, VPS, SSL) |
+| [docs/memory.md](docs/memory.md) | Conversation memory (multi-turn chat) |
 | [docs/api.md](docs/api.md) | API reference |
 | [docs/frontend.md](docs/frontend.md) | Frontend architecture |
 | [docs/generation.md](docs/generation.md) | Generation pipeline |
