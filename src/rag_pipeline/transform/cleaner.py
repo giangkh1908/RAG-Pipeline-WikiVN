@@ -121,7 +121,33 @@ class WikipediaArticleCleaner:
                 result.append(stripped)
 
         cleaned = "\n".join(result)
-        return re.sub(r"\n[ \t]*\n", "\n\n", cleaned)
+        cleaned = re.sub(r"\n[ \t]*\n", "\n\n", cleaned)
+        # Remove any remaining infobox coordinate/value remnants mixed into content
+        cleaned = self._remove_infobox_remnants(cleaned)
+        # Remove stray unmatched braces left by incomplete template stripping
+        cleaned = re.sub(r"\{\{|\}\}", " ", cleaned)
+        cleaned = re.sub(r"[ \t]+", " ", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def _remove_infobox_remnants(text: str) -> str:
+        """Remove parenthetical coordinate/value noise like '(Hà Nội) (Huế) ~ (TP. HCM)'.
+
+        These remnants appear when infobox location/coordinate templates are stripped
+        but their values remain inline with real content.
+        """
+        # Pattern: groups of parenthesized tokens separated by spaces and tildes
+        # e.g. "(Hà Nội) (Huế) ~ (TP. Hồ Chí Minh)" or "(London) (England)"
+        # Remove them when they appear at the start of a paragraph or after a newline.
+        remnant_re = re.compile(
+            r"(?:^|\n\n)"
+            r"(?:\s*[\(\[].*?[\)\]]){1,4}"
+            r"(?:\s*~\s*[\(\[].*?[\)\]])*"
+            r"\s*",
+            re.MULTILINE,
+        )
+        cleaned = remnant_re.sub("\n\n", text)
+        return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
     @staticmethod
     def _looks_like_real_content(line: str) -> bool:

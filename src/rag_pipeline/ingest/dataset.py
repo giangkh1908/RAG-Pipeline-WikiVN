@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import csv
+import gzip
 import json
 import struct
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -221,3 +223,42 @@ class LocalQueryCsvReader:
         if isinstance(parsed, list):
             return [str(item).strip() for item in parsed]
         return [str(parsed).strip()]
+
+
+class ChunkedJsonlReader:
+    """Reads pre-chunked JSONL files produced by Phase 1 (chunking).
+
+    Each line is a JSON object with fields:
+        chunk_id, doc_id, title, source_url, section_path,
+        context, text, chunk_index, token_count, etc.
+    """
+
+    def __init__(self, chunk_path: str | Path, sample_percent: float = 100.0) -> None:
+        self.chunk_path = Path(chunk_path)
+        self.sample_percent = sample_percent
+
+    def read(self) -> Iterable[SourceRecord]:
+        if self.chunk_path.suffix == ".gz":
+            fin_ctx = gzip.open(self.chunk_path, "rt", encoding="utf-8")
+        else:
+            fin_ctx = open(self.chunk_path, "r", encoding="utf-8")
+
+        with fin_ctx as fin:
+            for line_no, line in enumerate(fin, start=1):
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    print(f"[WARN] Skipping malformed chunk line {line_no}: {exc}", file=sys.stderr)
+                    continue
+
+                chunk_id = payload.get("chunk_id")
+                if not chunk_id:
+                    continue
+
+                # Apply sampling
+                if self.sample_percent < 100.0:
+                    import random
+                    if random.random() * 100 >= self.sample_percent:
+                        continue
+
+                yield SourceRecord(source_id=chunk_id, payload=payload)

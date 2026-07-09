@@ -20,6 +20,7 @@ from rag_pipeline.models import CanonicalDocument, DocumentChunk
 from rag_pipeline.utils.hashing import stable_hash
 
 _WORD_RE = re.compile(r"\S+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?;…])\s+")
 
 # ── Reference section patterns ──────────────────────────────────────
 
@@ -94,6 +95,7 @@ class StructuredChunker:
 
         doc_summary = self._extract_doc_summary(blocks)
         groups = self._group_into_chunks(blocks)
+        groups = self._split_oversized_groups(groups)
 
         chunks: list[DocumentChunk] = []
         for idx, (raw_text, section_path, is_ref) in enumerate(groups):
@@ -175,6 +177,58 @@ class StructuredChunker:
     ) -> None:
         if texts:
             groups.append((" ".join(texts), list(path), is_ref))
+
+    def _split_oversized_groups(
+        self, groups: list[tuple[str, list[str], bool]]
+    ) -> list[tuple[str, list[str], bool]]:
+        """Safety split: ensure no single chunk exceeds max_tokens.
+
+        Some articles (e.g. long lists of provinces) contain a single block
+        that is far larger than max_tokens. Split those by sentences first,
+        then by word windows if a sentence is still too long.
+        """
+        result: list[tuple[str, list[str], bool]] = []
+        overlap = 20
+        for raw_text, path, is_ref in groups:
+            if self._count_tokens(raw_text) <= self.config.max_tokens_per_chunk:
+                result.append((raw_text, path, is_ref))
+                continue
+
+            pieces = _SENTENCE_RE.split(raw_text)
+            current_texts: list[str] = []
+            current_tokens = 0
+            for piece in pieces:
+                piece = piece.strip()
+                if not piece:
+                    continue
+                piece_tokens = self._count_tokens(piece)
+
+                # Single sentence still too long → split by word window
+                if piece_tokens > self.config.max_tokens_per_chunk:
+                    words = _WORD_RE.findall(piece)
+                    stride = max(1, self.config.max_tokens_per_chunk - overlap)
+                    start = 0
+                    while start < len(words):
+                        end = min(start + self.config.max_tokens_per_chunk, len(words))
+                        window = " ".join(words[start:end])
+                        result.append((window, path, is_ref))
+                        start += stride
+                        if end == len(words):
+                            break
+                    current_texts = []
+                    current_tokens = 0
+                    continue
+
+                if current_tokens + piece_tokens > self.config.max_tokens_per_chunk and current_texts:
+                    result.append((" ".join(current_texts), path, is_ref))
+                    current_texts = [piece]
+                    current_tokens = piece_tokens
+                else:
+                    current_texts.append(piece)
+                    current_tokens += piece_tokens
+            if current_texts:
+                result.append((" ".join(current_texts), path, is_ref))
+        return result
 
     # ── Block parsing ───────────────────────────────────────────────
 

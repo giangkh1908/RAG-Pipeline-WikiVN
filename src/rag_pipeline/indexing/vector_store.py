@@ -110,10 +110,12 @@ def _id_from_str(value: str) -> str:
 @dataclass
 class QdrantVectorStore:
     config: QdrantConfig
-    vector_size: int = 2048
+    vector_size: int = 0  # 0 = use config.vector_size
     _client: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.vector_size == 0:
+            self.vector_size = self.config.vector_size
         self._client = self._get_client()
         self._ensure_collection()
 

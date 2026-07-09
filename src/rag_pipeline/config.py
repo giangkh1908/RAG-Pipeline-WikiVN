@@ -15,6 +15,9 @@ class ChunkingConfig:
 
 @dataclass(slots=True)
 class EmbeddingConfig:
+    # Embedding mode: "api" (OpenRouter) or "local" (GPU)
+    embedding_mode: str = field(default_factory=lambda: os.getenv("EMBEDDING_MODE", "api"))
+    # API settings (when mode=api)
     model_name: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
@@ -22,6 +25,10 @@ class EmbeddingConfig:
     sub_batch_size: int = 500
     max_retries: int = 3
     parallel_workers: int = 4
+    # Local settings (when mode=local)
+    local_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
+    local_batch_size: int = 256
+    local_device: str = "auto"  # "auto", "cuda", "cpu"
 
 
 @dataclass(slots=True)
@@ -30,6 +37,7 @@ class QdrantConfig:
     collection_name: str = "wikipedia_vi_chunks"
     dense_vector_name: str = "dense"
     sparse_vector_name: str = "bm25"
+    vector_size: int = 2048  # 2048 for OpenRouter, 1024 for Qwen3-Embedding-0.6B
 
 
 @dataclass(slots=True)
@@ -133,3 +141,8 @@ class IngestConfig:
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
+    # BM25 index built during ingestion and used by retrieval
+    bm25_index_path: Path = Path("index/bm25.pkl")
+    bm25_tokenizer: str = "underthesea"  # "underthesea", "pyvi", or "simple"
+    # Phase 1 output: chunked JSONL path
+    chunk_output_path: Path = Path("chunks/chunks.jsonl")
