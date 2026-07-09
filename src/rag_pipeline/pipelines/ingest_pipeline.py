@@ -9,8 +9,8 @@ from rag_pipeline.indexing.embedder import Embedder
 from rag_pipeline.indexing.vector_store import VectorStore
 from rag_pipeline.ingest.normalize import UVWWikipediaDocumentNormalizer
 from rag_pipeline.models import CanonicalDocument, DocumentChunk, IndexingResult, IndexedChunk, SourceRecord
-from rag_pipeline.transform.chunker import RecursiveChunker
 from rag_pipeline.transform.cleaner import WikipediaArticleCleaner
+from rag_pipeline.transform.structure_chunker import StructuredChunker
 
 
 class IngestPipeline:
@@ -24,7 +24,7 @@ class IngestPipeline:
         self,
         normalizer: UVWWikipediaDocumentNormalizer,
         cleaner: WikipediaArticleCleaner,
-        chunker: RecursiveChunker,
+        chunker: StructuredChunker,
         embedder: Embedder,
         vector_store: VectorStore,
         embed_batch_size: int = 500,

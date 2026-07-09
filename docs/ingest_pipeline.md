@@ -291,6 +291,8 @@ CanonicalDocument(
 
 ## 9. Clean — Xóa markup
 
+### `WikipediaArticleCleaner` v2
+
 `WikipediaArticleCleaner` xử lý text qua 6 bước:
 
 ```
@@ -318,33 +320,64 @@ Raw Wikipedia text
 Clean text
 ```
 
+### Cải tiến v2
+
+| Vấn đề v1 | Fix v2 |
+|---|---|
+| Template lồng nhau `{{A|{{B|C}}}}` bị cắt sai | Lặp bóc template trong cùng nhất đến khi hết |
+| Infobox value tiếp tục sang dòng mới (`\| key = value\n| other = ...`) bị sót | Regex multi-line remove infobox continuations |
+| Các dòng remnant như `(Hà Nội) (Huế) ~ (TP. HCM)` còn lại | Giảm ~25% noise trên sample 30 bài |
+
+Chi tiết kiến trúc clean: xem `src/rag_pipeline/transform/cleaner.py` và `tests/test_cleaner.py`.
+
 ---
 
 ## 10. Chunk — Chia nhỏ văn bản
 
-### `RecursiveChunker` — Chiến lược chia
+### `StructuredChunker` — Chiến lược chia v2
 
-Chia text theo thứ tự ưu tiên, giữ boundary tự nhiên:
+> **v2 thay thế `RecursiveChunker` bằng `StructuredChunker`.**
+> Chi tiết: [docs/chunking.md](chunking.md)
+
+Pipeline mới parse cấu trúc bài viết trước khi chia:
 
 ```
-Level 0: Paragraph (\n\n)
+Clean text
     │
-    ├─ Nếu ≤ 300 tokens → giữ nguyên
+    ▼
+Parse blocks (heading / paragraph / list)
     │
-    └─ Nếu > 300 tokens → Level 1: Sentence (. ! ? ;)
-            │
-            ├─ Merge câu nhỏ cho đến khi đầy 300 tokens
-            │
-            └─ Nếu câu vẫn > 300 tokens → Level 2: Word window (sliding)
+    ▼
+Heading = hard boundary
+    │
+    ▼
+Gom blocks cùng section thành chunk
+    │
+    ▼
+Thêm Anthropic-style context prefix
+    │
+    ▼
+DocumentChunk.text = "{context}\n\n{raw_text}"
 ```
+
+### Tại sao đổi?
+
+| | RecursiveChunker (v1) | StructuredChunker (v2) |
+|---|---|---|
+| Boundary | Paragraph / sentence | Heading (hard boundary) |
+| Section awareness | Không | Có (`section_path`) |
+| Context prefix | Không | Natural language |
+| List handling | Có thể cắt ngang | Giữ nguyên list |
+| Reference sections | Không phân biệt | `is_reference_section` flag |
+| Dependencies | stdlib | stdlib |
 
 ### Tại sao không dùng SemanticChunking?
 
-| | SemanticChunker | RecursiveChunker |
+| | SemanticChunker | StructuredChunker |
 |---|---|---|
 | Dependencies | `sentence-transformers`, `torch`, `numpy` | Không có |
-| 1.1M docs | ~30 giờ | ~22 giây |
-| Chất lượng | Semantic coherence cao | Giữ paragraph boundary |
+| 1.1M docs | ~30 giờ | ~vài phút |
+| Chất lượng | Semantic coherence cao | Giữ section boundary + context |
 | Disk usage | ~5 GB (torch) | 0 MB |
 
 ---

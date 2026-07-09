@@ -44,8 +44,8 @@ from rag_pipeline.pipelines.retrieval_pipeline import RetrievalPipeline
 from rag_pipeline.query.guardrails import QueryGuardrails
 from rag_pipeline.query.normalizer import QueryNormalizer
 from rag_pipeline.query.rewriter import QueryRewriter
-from rag_pipeline.transform.chunker import RecursiveChunker
 from rag_pipeline.transform.cleaner import WikipediaArticleCleaner
+from rag_pipeline.transform.structure_chunker import StructuredChunker
 
 
 def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> IngestPipeline:
@@ -70,7 +70,7 @@ def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_q
             language=config.language,
         ),
         cleaner=WikipediaArticleCleaner(),
-        chunker=RecursiveChunker(config.chunking),
+        chunker=StructuredChunker(config.chunking),
         embedder=embedder,
         vector_store=vector_store,
         skip_qdrant_check=skip_qdrant_check,
