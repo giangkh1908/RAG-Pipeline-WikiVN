@@ -1,8 +1,10 @@
+import tempfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from rag_pipeline.config import ChunkingConfig, IngestConfig
+from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import DeterministicTestEmbedder
 from rag_pipeline.indexing.vector_store import InMemoryVectorStore
 from rag_pipeline.ingest.dataset import (
@@ -22,12 +24,14 @@ from rag_pipeline.transform.cleaner import WikipediaArticleCleaner
 class PipelineTests(unittest.TestCase):
     def test_pipeline_is_idempotent_for_identical_records(self) -> None:
         vector_store = InMemoryVectorStore()
+        bm25_index = BM25Index(index_path=Path(tempfile.mktemp(suffix='.db')))
         pipeline = IngestPipeline(
             normalizer=UVWWikipediaDocumentNormalizer(),
             cleaner=WikipediaArticleCleaner(),
             chunker=RecursiveChunker(ChunkingConfig()),
             embedder=DeterministicTestEmbedder(),
             vector_store=vector_store,
+            bm25_index=bm25_index,
         )
         record = SourceRecord(
             source_id="record-1",

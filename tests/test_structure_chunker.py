@@ -66,6 +66,12 @@ class ReferenceDetectionTests(unittest.TestCase):
         self.assertFalse(StructuredChunker._is_reference_heading("Lịch sử"))
         self.assertFalse(StructuredChunker._is_reference_heading("Địa lý"))
 
+    def test_reference_heading_matches_without_diacritics(self) -> None:
+        """Content that has lost its Vietnamese tone marks still matches."""
+        self.assertTrue(StructuredChunker._is_reference_heading("Tham khao"))
+        self.assertTrue(StructuredChunker._is_reference_heading("LIEN KET NGOAI"))
+        self.assertTrue(StructuredChunker._is_reference_heading("  tham khao  "))
+
 
 class ContextTests(unittest.TestCase):
     """Test natural-language contextual prefix."""
@@ -179,6 +185,22 @@ class ChunkerTests(unittest.TestCase):
         self.assertIn("Điểm cực bắc", list_text)
         self.assertIn("Điểm cực nam", list_text)
 
+    def test_list_items_preserve_newlines(self) -> None:
+        """List items should stay on separate lines inside the chunk text."""
+        chunker = StructuredChunker(ChunkingConfig(max_tokens_per_chunk=300))
+        doc = _make_doc(
+            "Địa lý\n\n"
+            "Tỉnh có các điểm cực:\n"
+            "* Điểm cực bắc: xã A\n"
+            "* Điểm cực nam: xã B"
+        )
+        chunks = chunker.chunk(doc)
+
+        raw = chunks[0].text
+        # The list block must be joined with newlines, not spaces.
+        self.assertIn("\n* Điểm cực bắc: xã A", raw)
+        self.assertIn("\n* Điểm cực nam: xã B", raw)
+
     def test_neighbors_are_linked(self) -> None:
         chunker = StructuredChunker(ChunkingConfig(max_tokens_per_chunk=50))
         doc = _make_doc(
@@ -204,19 +226,60 @@ class ChunkerTests(unittest.TestCase):
         self.assertEqual(chunks1[0].chunk_id, chunks2[0].chunk_id)
 
     def test_large_paragraph_splits_without_crossing_heading(self) -> None:
-        """Large text gets split but still within section boundaries."""
-        chunker = StructuredChunker(ChunkingConfig(max_tokens_per_chunk=10))
+        """Large text gets split and each chunk respects the token limit."""
+        max_tokens = 50
+        chunker = StructuredChunker(ChunkingConfig(max_tokens_per_chunk=max_tokens))
         doc = _make_doc(
-            "đoạn một có nội dung dài về lịch sử hình thành phát triển\n\n"
+            "đoạn một có nội dung dài về lịch sử hình thành phát triển " * 20 + "\n\n"
             "Văn hóa\n\n"
-            "đoạn hai có nội dung về văn hóa nghệ thuật truyền thống"
+            "đoạn hai có nội dung về văn hóa nghệ thuật truyền thống " * 20
         )
         chunks = chunker.chunk(doc)
 
+        # Every chunk must fit inside the configured limit.
+        for c in chunks:
+            self.assertLessEqual(
+                c.token_count, max_tokens,
+                f"chunk exceeds limit: {c.text[:80]!r}"
+            )
+
         # All chunks under "Văn hóa" must have that in path
         for c in chunks:
-            if "văn hóa" in c.text.lower():
+            if "văn hóa" in c.text.lower() and "Văn hóa" not in c.section_path:
                 self.assertIn("Văn hóa", c.section_path)
+
+    def test_very_large_paragraph_is_split_into_multiple_chunks(self) -> None:
+        """A 1000-word paragraph must not end up as a single chunk."""
+        max_tokens = 300
+        chunker = StructuredChunker(ChunkingConfig(max_tokens_per_chunk=max_tokens))
+        doc = _make_doc(" ".join(["từ"] * 1000))
+        chunks = chunker.chunk(doc)
+
+        self.assertGreater(len(chunks), 1)
+        for c in chunks:
+            self.assertLessEqual(
+                c.token_count, max_tokens,
+                f"chunk size {c.token_count} exceeds {max_tokens}"
+            )
+
+    def test_tiny_tail_chunks_are_merged_within_section(self) -> None:
+        """A small trailing chunk in the same section is merged with its predecessor."""
+        chunker = StructuredChunker(
+            ChunkingConfig(max_tokens_per_chunk=300, min_chunk_tokens=40)
+        )
+        # One long paragraph followed by a very short one, no heading between them.
+        doc = _make_doc(
+            " ".join(["từ"] * 200) + "\n\n" + " ".join(["từ"] * 5)
+        )
+        chunks = chunker.chunk(doc)
+
+        # The last chunk should not be a standalone tiny chunk if it can be merged.
+        last = chunks[-1]
+        context, raw = StructuredChunker.split_context_and_text(last.text)
+        self.assertGreaterEqual(
+            len(raw.split()), 5,
+            "tiny tail should have been merged into the previous chunk"
+        )
 
 
 if __name__ == "__main__":

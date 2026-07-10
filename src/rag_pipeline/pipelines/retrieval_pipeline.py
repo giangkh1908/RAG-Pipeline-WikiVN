@@ -42,7 +42,7 @@ class RetrievalPipeline:
         )
 
         # Step 2: BM25 search
-        bm25_results: list[tuple[str, float]] = []
+        bm25_results: list[tuple[str, str, float, str]] = []
         if self.bm25_index.is_loaded:
             bm25_results = self.bm25_index.search(
                 query=query.bm25_query,

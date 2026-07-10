@@ -515,9 +515,10 @@ PointStruct(
 | Config | Default | Ý nghĩa |
 |--------|---------|---------|
 | **Chunking** | | |
-| `chunking.max_tokens_per_chunk` | 300 | Số token tối đa mỗi chunk |
+| `chunking.max_tokens_per_chunk` | 300 | Số token tối đa cho **toàn bộ** input embedding (context + body) |
 | `chunking.chunk_overlap_tokens` | 40 | Số token overlap giữa chunk liền kề |
-| `chunking.chunking_strategy` | `"recursive"` | Strategy chunking |
+| `chunking.min_chunk_tokens` | 40 | Ngưỡng merge chunk đuôi nhỏ trong cùng section |
+| `chunking.estimated_context_tokens` | 40 | Margin an toàn cho tokenizer thực tế |
 | **Embedding** | | |
 | `embedding.model_name` | `nvidia/llama-nemotron-embed-vl-1b-v2:free` | Model trên OpenRouter |
 | `embedding.api_base` | `https://openrouter.ai/api/v1` | API endpoint |
@@ -545,7 +546,7 @@ PointStruct(
 | `ingest/dataset.py` | `LocalJsonlReader` (offset index), `LocalCorpusCsvReader`, `LocalQueryCsvReader`, `HuggingFaceDatasetReader` |
 | `ingest/normalize.py` | `UVWWikipediaDocumentNormalizer` — payload → `CanonicalDocument` |
 | `transform/cleaner.py` | `WikipediaArticleCleaner` — 6-step wiki markup removal |
-| `transform/chunker.py` | `RecursiveChunker` — paragraph → sentence → word splitting |
+| `transform/structure_chunker.py` | `StructuredChunker` — heading-aware chunks + Anthropic-style context |
 | `pipelines/ingest_pipeline.py` | `IngestPipeline.run()` — background flush, parallel embed, batch upsert |
 | `indexing/embedder.py` | `OpenRouterEmbeddingClient` (parallel sub-batch + retry), `DeterministicTestEmbedder` |
 | `indexing/vector_store.py` | `QdrantVectorStore` (batch upsert), `InMemoryVectorStore` |

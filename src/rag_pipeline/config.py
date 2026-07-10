@@ -10,7 +10,15 @@ class ChunkingConfig:
     max_tokens_per_chunk: int = 300
     chunk_overlap_tokens: int = 40
     min_chunk_tokens: int = 40
-    chunking_strategy: str = "recursive"
+    # Safety margin so the full embedding input (context + body) stays under
+    # the model's token limit even when the real tokenizer counts more tokens
+    # than the simple whitespace heuristic used internally.
+    estimated_context_tokens: int = 40
+    # BM25 index (SQLite FTS5) — built during ingest
+    # NOTE: Also defined in RetrievalConfig for search-time usage.
+    # Both must stay in sync; ingest builds the index, retrieval reads it.
+    bm25_index_path: Path = Path("index/bm25.db")
+    bm25_tokenizer: str = "underthesea"  # "underthesea", "pyvi", or "simple"
 
 
 @dataclass(slots=True)
@@ -57,7 +65,7 @@ class RetrievalConfig:
     dense_top_k: int = 50
     # BM25 search
     bm25_top_k: int = 50
-    bm25_index_path: Path = Path("index/bm25.pkl")
+    bm25_index_path: Path = Path("index/bm25.db")
     bm25_tokenizer: str = "underthesea"  # "underthesea", "pyvi", or "simple"
     # RRF fusion
     rrf_k: int = 60

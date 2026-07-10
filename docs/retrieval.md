@@ -42,11 +42,11 @@ src/rag_pipeline/
 
 ### 2. BM25 Index (`indexing/bm25_index.py`)
 
-- Library: `rank_bm25` (BM25Okapi)
+- Backend: SQLite FTS5 (instant load, incremental, no RAM)
 - Tokenizer: underthesea (Vietnamese word segmentation), pyvi, hoặc simple (fallback)
-- Build index từ (chunk_id, text) pairs
-- Save/load pickle format
-- Search: trả về (chunk_id, score) pairs
+- Index: raw content only (không chứa context prefix)
+- Incremental insert: INSERT vào SQLite khi ingest
+- Search: trả về (chunk_id, doc_id, score, full_text)
 
 ### 3. RRF Fusion (`indexing/rrf.py`)
 
@@ -119,7 +119,7 @@ class RetrievalConfig:
     dense_top_k: int = 50
     # BM25 search
     bm25_top_k: int = 50
-    bm25_index_path: Path = Path("index/bm25.pkl")
+    bm25_index_path: Path = Path("index/bm25.db")
     bm25_tokenizer: str = "underthesea"
     # RRF fusion
     rrf_k: int = 60
@@ -173,9 +173,9 @@ python -m rag_pipeline.main search --question "..." --no-qdrant
 ## Dependencies
 
 ```bash
-pip install rank-bm25        # BM25 Okapi
-pip install underthesea      # Vietnamese tokenizer (optional)
+pip install underthesea      # Vietnamese tokenizer (optional, for BM25)
 pip install httpx            # HTTP client (already installed)
+# SQLite FTS5 — built-in Python, no extra install
 ```
 
 ## Environment Variables
@@ -189,7 +189,7 @@ COHERE_API_KEY=...              # Re-ranker
 
 | File | Tests | Coverage |
 |------|-------|----------|
-| test_bm25_index.py | 7 | Build, search, save/load, tokenizer |
-| test_rrf.py | 6 | Fusion logic, score calculation, edge cases |
+| test_bm25_index.py | 10 | Insert, search, save/load, tokenizer, incremental |
+| test_rrf.py | 7 | Fusion logic, score calculation, BM25-only results |
 | test_retrieval_pipeline.py | 4 | Full pipeline, empty store, context assembly |
-| **Total** | **17** | **65/65 pass** (bao gồm Phase 1+2 tests) |
+| **Total** | **21** | **132/132 pass** (bao gồm Phase 1+2 tests) |

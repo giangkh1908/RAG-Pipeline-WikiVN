@@ -5,6 +5,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 
+from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import Embedder
 from rag_pipeline.indexing.vector_store import VectorStore
 from rag_pipeline.ingest.normalize import UVWWikipediaDocumentNormalizer
@@ -14,10 +15,11 @@ from rag_pipeline.transform.structure_chunker import StructuredChunker
 
 
 class IngestPipeline:
-    """End-to-end ingest flow: normalize → clean → chunk → embed → index.
+    """End-to-end ingest flow: normalize → clean → chunk → BM25 insert → embed → index.
 
-    Streaming batch with background flush: while the main thread reads and
-    chunks documents, a background thread embeds and upserts the previous batch.
+    Streaming batch with background flush: while the main thread reads,
+    chunks, and inserts into BM25, a background thread embeds and upserts
+    the previous batch to Qdrant.
     """
 
     def __init__(
@@ -27,6 +29,7 @@ class IngestPipeline:
         chunker: StructuredChunker,
         embedder: Embedder,
         vector_store: VectorStore,
+        bm25_index: BM25Index,
         embed_batch_size: int = 500,
         flush_workers: int = 2,
         skip_qdrant_check: bool = False,
@@ -36,6 +39,7 @@ class IngestPipeline:
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
+        self.bm25_index = bm25_index
         self.embed_batch_size = embed_batch_size
         self.flush_workers = flush_workers
         self.skip_qdrant_check = skip_qdrant_check
@@ -101,6 +105,9 @@ class IngestPipeline:
                 self._log_progress(total_docs, total_chunks, total_flushes, skipped, start_time)
                 continue
 
+            # BM25 insert — right after chunking, before embedding
+            self._insert_bm25(chunks, document)
+
             for chunk in chunks:
                 buffer.append((chunk.text, document.doc_id, document.checksum, chunk, document))
             total_chunks += len(chunks)
@@ -129,6 +136,21 @@ class IngestPipeline:
         print(f"{'='*60}")
 
         return results
+
+    def _insert_bm25(self, chunks: list[DocumentChunk], document: CanonicalDocument) -> None:
+        """Insert chunks into BM25 index (raw content only, not context prefix)."""
+        items = []
+        for chunk in chunks:
+            _, raw_content = StructuredChunker.split_context_and_text(chunk.text)
+            items.append({
+                "chunk_id": chunk.chunk_id,
+                "doc_id": document.doc_id,
+                "raw_content": raw_content,
+                "full_text": chunk.text,
+                "section_path": chunk.section_path,
+                "checksum": document.checksum,
+            })
+        self.bm25_index.insert_batch(items)
 
     def _log_progress(self, total_docs: int, total_chunks: int, total_flushes: int, skipped: int, start_time: float) -> None:
         """Log progress to terminal."""

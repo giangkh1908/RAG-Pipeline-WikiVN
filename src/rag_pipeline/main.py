@@ -64,6 +64,12 @@ def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_q
         vector_store = InMemoryVectorStore()
         embedder = DeterministicTestEmbedder()
 
+    # BM25 index (SQLite FTS5)
+    bm25_index = BM25Index(
+        index_path=config.chunking.bm25_index_path,
+        tokenizer_name=config.chunking.bm25_tokenizer,
+    )
+
     return IngestPipeline(
         normalizer=UVWWikipediaDocumentNormalizer(
             jurisdiction=config.jurisdiction,
@@ -73,6 +79,7 @@ def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_q
         chunker=StructuredChunker(config.chunking),
         embedder=embedder,
         vector_store=vector_store,
+        bm25_index=bm25_index,
         skip_qdrant_check=skip_qdrant_check,
     )
 
@@ -184,12 +191,11 @@ def build_retrieval_pipeline(
         vector_store = InMemoryVectorStore()
         embedder = DeterministicTestEmbedder()
 
-    # BM25 index
+    # BM25 index (SQLite FTS5 — opens existing file if present)
     bm25_index = BM25Index(
         index_path=retrieval_config.bm25_index_path,
         tokenizer_name=retrieval_config.bm25_tokenizer,
     )
-    bm25_index.load()  # Try to load existing index
 
     # Re-ranker
     reranker = None

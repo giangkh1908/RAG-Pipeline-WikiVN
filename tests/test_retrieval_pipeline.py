@@ -32,7 +32,7 @@ class TestRetrievalPipeline:
             rrf_top_k=5,
             enable_rerank=True,
             rerank_top_k=3,
-            bm25_index_path=Path(self.tmpdir) / "bm25.pkl",
+            bm25_index_path=Path(self.tmpdir) / "bm25.db",
         )
 
     def test_basic_pipeline(self):
