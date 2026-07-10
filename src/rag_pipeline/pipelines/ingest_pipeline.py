@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from rag_pipeline.indexing.bm25_index import BM25Index
-from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import Embedder
 from rag_pipeline.indexing.vector_store import VectorStore
 from rag_pipeline.ingest.normalize import UVWWikipediaDocumentNormalizer
@@ -32,7 +31,6 @@ class IngestPipeline:
         embedder: Embedder,
         vector_store: VectorStore,
         bm25_index: BM25Index,
-        bm25_index: BM25Index,
         embed_batch_size: int = 500,
         flush_workers: int = 2,
         skip_qdrant_check: bool = False,
@@ -42,7 +40,6 @@ class IngestPipeline:
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
-        self.bm25_index = bm25_index
         self.bm25_index = bm25_index
         self.embed_batch_size = embed_batch_size
         self.flush_workers = flush_workers

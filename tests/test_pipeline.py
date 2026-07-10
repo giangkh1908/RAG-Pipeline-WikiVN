@@ -33,7 +33,6 @@ class PipelineTests(unittest.TestCase):
             embedder=DeterministicTestEmbedder(),
             vector_store=vector_store,
             bm25_index=bm25_index,
-            bm25_index=bm25_index,
         )
         record = SourceRecord(
             source_id="record-1",
