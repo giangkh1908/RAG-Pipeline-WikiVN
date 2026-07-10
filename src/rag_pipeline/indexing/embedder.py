@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from rag_pipeline.config import EmbeddingConfig
@@ -122,3 +123,75 @@ class DeterministicTestEmbedder:
             base = sum(ord(ch) for ch in text)
             vectors.append([float((base + i) % 97) / 97.0 for i in range(self.dimensions)])
         return vectors
+
+
+@dataclass
+class LocalEmbedder:
+    """Local embedding using sentence-transformers on GPU.
+
+    Default model: Qwen/Qwen3-Embedding-0.6B
+    - 1024 dimensions
+    - Supports Vietnamese text
+    - Runs on CUDA GPU
+    """
+
+    model_name: str = "Qwen/Qwen3-Embedding-0.6B"
+    batch_size: int = 256
+    device: str = "auto"  # "auto", "cuda", "cpu"
+    _model: any = field(default=None, init=False, repr=False)
+    _device: str = field(default="", init=False)
+
+    def __post_init__(self):
+        self._init_model()
+
+    def _init_model(self):
+        """Initialize the model and move to GPU."""
+        try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "Local embedding requires `sentence-transformers` and `torch`. "
+                "Install with: pip install sentence-transformers torch"
+            ) from exc
+
+        # Determine device
+        if self.device == "auto":
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self._device = self.device
+
+        print(f"[EMBEDDER] Loading model '{self.model_name}' on {self._device}...", flush=True)
+        self._model = SentenceTransformer(self.model_name, device=self._device)
+        print(f"[EMBEDDER] Model loaded. Embedding dim: {self._model.get_sentence_embedding_dimension()}", flush=True)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts using local model on GPU."""
+        if self._model is None:
+            raise RuntimeError("Model not initialized.")
+
+        all_vectors: list[list[float]] = []
+        total_batches = (len(texts) + self.batch_size - 1) // self.batch_size
+
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+            batch_num = i // self.batch_size + 1
+
+            # Encode batch
+            embeddings = self._model.encode(
+                batch,
+                batch_size=self.batch_size,
+                show_progress_bar=False,
+                normalize_embeddings=True,
+            )
+            all_vectors.extend(embeddings.tolist())
+
+            # Progress log
+            if batch_num % 10 == 0 or batch_num == total_batches:
+                sys.stdout.write(f"\r\033[K")
+                sys.stdout.write(f"[EMBED] {batch_num}/{total_batches} batches | {len(all_vectors):,}/{len(texts):,} texts")
+                sys.stdout.flush()
+
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return all_vectors

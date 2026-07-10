@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from rag_pipeline.config import ChunkingConfig, IngestConfig
 from rag_pipeline.indexing.bm25_index import BM25Index
+from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import DeterministicTestEmbedder
 from rag_pipeline.indexing.vector_store import InMemoryVectorStore
 from rag_pipeline.ingest.dataset import (
@@ -31,6 +32,7 @@ class PipelineTests(unittest.TestCase):
             chunker=RecursiveChunker(ChunkingConfig()),
             embedder=DeterministicTestEmbedder(),
             vector_store=vector_store,
+            bm25_index=bm25_index,
             bm25_index=bm25_index,
         )
         record = SourceRecord(

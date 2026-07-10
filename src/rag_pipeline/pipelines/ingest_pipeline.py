@@ -4,7 +4,9 @@ import sys
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
+from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.bm25_index import BM25Index
 from rag_pipeline.indexing.embedder import Embedder
 from rag_pipeline.indexing.vector_store import VectorStore
@@ -30,6 +32,7 @@ class IngestPipeline:
         embedder: Embedder,
         vector_store: VectorStore,
         bm25_index: BM25Index,
+        bm25_index: BM25Index,
         embed_batch_size: int = 500,
         flush_workers: int = 2,
         skip_qdrant_check: bool = False,
@@ -39,6 +42,7 @@ class IngestPipeline:
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
+        self.bm25_index = bm25_index
         self.bm25_index = bm25_index
         self.embed_batch_size = embed_batch_size
         self.flush_workers = flush_workers
@@ -50,6 +54,9 @@ class IngestPipeline:
 
         # Streaming buffer: (text, doc_id, checksum, chunk, document)
         buffer: list[tuple[str, str, str, DocumentChunk, CanonicalDocument]] = []
+
+        # BM25 corpus: (chunk_id, raw_text) pairs collected for final index build
+        bm25_docs: list[tuple[str, str]] = []
 
         # Progress tracking
         start_time = time.perf_counter()
@@ -110,6 +117,7 @@ class IngestPipeline:
 
             for chunk in chunks:
                 buffer.append((chunk.text, document.doc_id, document.checksum, chunk, document))
+                bm25_docs.append((chunk.chunk_id, self._raw_chunk_text(chunk)))
             total_chunks += len(chunks)
 
             # Flush full batches in background — main thread continues reading
@@ -127,6 +135,10 @@ class IngestPipeline:
         # Wait for all background flushes to finish
         _wait_for_flushes()
         executor.shutdown(wait=False)
+
+        # Build BM25 keyword index from all ingested chunks
+        if bm25_docs:
+            self.bm25_index.build(bm25_docs)
 
         elapsed = time.perf_counter() - start_time
         indexed = sum(1 for r in results if r.updated)
@@ -163,7 +175,7 @@ class IngestPipeline:
 
         sys.stdout.write(f"\r\033[K")
         sys.stdout.write(
-            f"📊 {total_docs:>8,} docs | "
+            f"[INGEST] {total_docs:>8,} docs | "
             f"{indexed:>7,} indexed | "
             f"{skipped:>6,} skip | "
             f"{total_chunks:>9,} chunks | "
@@ -172,6 +184,47 @@ class IngestPipeline:
             f"{rate:>7.0f} docs/s"
         )
         sys.stdout.flush()
+
+    def _log_chunking_progress(self, total_docs: int, total_chunks: int, skipped: int, start_time: float) -> None:
+        """Log chunking progress to terminal."""
+        elapsed = time.perf_counter() - start_time
+        rate = total_docs / elapsed if elapsed > 0 else 0
+
+        sys.stdout.write(f"\r\033[K")
+        sys.stdout.write(
+            f"[CHUNK] {total_docs:>8,} docs | "
+            f"{total_chunks:>9,} chunks | "
+            f"{skipped:>6,} skip | "
+            f"{elapsed:>6.0f}s | "
+            f"{rate:>7.0f} docs/s"
+        )
+        sys.stdout.flush()
+
+    def _log_embedding_progress(self, total_chunks: int, total_flushes: int, skipped: int, start_time: float) -> None:
+        """Log embedding progress to terminal."""
+        elapsed = time.perf_counter() - start_time
+        rate = total_chunks / elapsed if elapsed > 0 else 0
+
+        sys.stdout.write(f"\r\033[K")
+        sys.stdout.write(
+            f"[EMBED] {total_chunks:>8,} chunks | "
+            f"{total_flushes:>4} batches | "
+            f"{skipped:>6,} skip | "
+            f"{elapsed:>6.0f}s | "
+            f"{rate:>7.0f} chunks/s"
+        )
+        sys.stdout.flush()
+
+    @staticmethod
+    def _raw_chunk_text(chunk: DocumentChunk) -> str:
+        """Return raw chunk text without the contextual prefix if present.
+
+        StructuredChunker prepends a context paragraph separated by a blank line.
+        For keyword search we index only the original chunk content.
+        """
+        if "\n\n" in chunk.text:
+            return chunk.text.split("\n\n", 1)[1]
+        return chunk.text
 
     def _flush_batch(
         self,

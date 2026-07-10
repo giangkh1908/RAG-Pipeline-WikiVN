@@ -22,6 +22,7 @@ from rag_pipeline.utils.hashing import stable_hash
 
 _WORD_RE = re.compile(r"\S+")
 _SENTENCE_RE = re.compile(r"(?<=[.!?;…])\s+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?;…])\s+")
 
 # ── Reference section patterns ──────────────────────────────────────
 

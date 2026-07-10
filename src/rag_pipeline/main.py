@@ -20,11 +20,12 @@ from rag_pipeline.config import (
     RetrievalConfig,
 )
 from rag_pipeline.indexing.bm25_index import BM25Index
-from rag_pipeline.indexing.embedder import DeterministicTestEmbedder, OpenRouterEmbeddingClient
+from rag_pipeline.indexing.embedder import DeterministicTestEmbedder, LocalEmbedder, OpenRouterEmbeddingClient
 from rag_pipeline.indexing.llm_client import DeterministicTestLLM, OpenRouterLLMClient
 from rag_pipeline.indexing.reranker import BGEReranker, CohereReranker, DeterministicTestReranker
 from rag_pipeline.indexing.vector_store import InMemoryVectorStore, QdrantVectorStore
 from rag_pipeline.ingest.dataset import (
+    ChunkedJsonlReader,
     HuggingFaceDatasetReader,
     LocalCorpusCsvReader,
     LocalJsonlReader,
@@ -49,17 +50,35 @@ from rag_pipeline.transform.structure_chunker import StructuredChunker
 
 
 def build_ingest_pipeline(config: IngestConfig, use_qdrant: bool = False, skip_qdrant_check: bool = False) -> IngestPipeline:
-    """Build pipeline: InMemory + DeterministicEmbedder (dev) or Qdrant + OpenRouter (prod)."""
+    """Build pipeline: InMemory + DeterministicEmbedder (dev) or Qdrant + OpenRouter/Local (prod)."""
+    embedding_mode = config.embedding.embedding_mode
+
     if use_qdrant:
-        if not os.getenv(config.embedding.api_key_env):
-            raise RuntimeError(
-                f"Production mode requires {config.embedding.api_key_env} environment variable."
-            )
+        # Set vector size based on embedding mode
+        if embedding_mode == "local":
+            config.qdrant.vector_size = 1024  # Qwen3-Embedding-0.6B
+        else:
+            config.qdrant.vector_size = 2048  # OpenRouter
+
         vector_store = QdrantVectorStore(config.qdrant)
-        embedder = OpenRouterEmbeddingClient(
-            config.embedding,
-            parallel_workers=config.embedding.parallel_workers,
-        )
+
+        if embedding_mode == "local":
+            # Local GPU embedding
+            embedder = LocalEmbedder(
+                model_name=config.embedding.local_model_name,
+                batch_size=config.embedding.local_batch_size,
+                device=config.embedding.local_device,
+            )
+        else:
+            # API embedding (OpenRouter)
+            if not os.getenv(config.embedding.api_key_env):
+                raise RuntimeError(
+                    f"Production mode requires {config.embedding.api_key_env} environment variable."
+                )
+            embedder = OpenRouterEmbeddingClient(
+                config.embedding,
+                parallel_workers=config.embedding.parallel_workers,
+            )
     else:
         vector_store = InMemoryVectorStore()
         embedder = DeterministicTestEmbedder()
@@ -410,6 +429,20 @@ if __name__ == "__main__":
     ingest_parser.add_argument("--qdrant", action="store_true", default=True, help="Use Qdrant (default: True)")
     ingest_parser.add_argument("--clear", action="store_true", default=False, help="Clear Qdrant collection before ingest")
 
+    # Chunk command (Phase 1: offline chunking)
+    chunk_parser = subparsers.add_parser("chunk", help="Phase 1: Chunk documents → JSONL (no API needed)")
+    chunk_parser.add_argument("--input", type=str, default="documents/train.jsonl", help="Input JSONL path")
+    chunk_parser.add_argument("--output", type=str, default="chunks/chunks.jsonl", help="Output chunks JSONL path")
+    chunk_parser.add_argument("--sample", type=float, default=100.0, help="Sample percent (default: 100 = full)")
+    chunk_parser.add_argument("--limit", type=int, default=None, help="Only process first N documents")
+
+    # Embed command (Phase 2: embed + index)
+    embed_parser = subparsers.add_parser("embed", help="Phase 2: Embed chunks → Qdrant + BM25 (needs API)")
+    embed_parser.add_argument("--input", type=str, default="chunks/chunks.jsonl", help="Input chunks JSONL path")
+    embed_parser.add_argument("--qdrant", action="store_true", default=True, help="Use Qdrant (default: True)")
+    embed_parser.add_argument("--no-qdrant", action="store_true", default=False, help="Use InMemory instead of Qdrant")
+    embed_parser.add_argument("--clear", action="store_true", default=False, help="Clear Qdrant collection before embed")
+
     # Query command
     query_parser = subparsers.add_parser("query", help="Process a query")
     query_parser.add_argument("--question", type=str, required=True, help="Question to process")
@@ -460,6 +493,45 @@ if __name__ == "__main__":
         )
         doc_ids = ingest(config, use_qdrant=args.qdrant, skip_qdrant_check=skip_qdrant_check)
         print(f"✅ Indexed {len(doc_ids)} documents")
+
+    elif args.command == "chunk":
+        config = IngestConfig(
+            source_type="local_jsonl",
+            jsonl_path=args.input,
+            jsonl_sample_percent=args.sample,
+        )
+        pipeline = build_ingest_pipeline(config, use_qdrant=False)
+        reader = LocalJsonlReader(config.jsonl_path, sample_percent=config.jsonl_sample_percent)
+
+        # Apply limit if specified
+        if args.limit:
+            import itertools
+            records = itertools.islice(reader.read(), args.limit)
+        else:
+            records = reader.read()
+
+        total_chunks = pipeline.run_chunking(records, Path(args.output))
+        print(f"✅ Chunked into {total_chunks:,} chunks")
+
+    elif args.command == "embed":
+        use_qdrant = args.qdrant and not args.no_qdrant
+
+        if args.clear and use_qdrant:
+            from qdrant_client import QdrantClient
+            from rag_pipeline.config import QdrantConfig
+            cfg = QdrantConfig()
+            client = QdrantClient(url=cfg.url)
+            try:
+                client.delete_collection(cfg.collection_name)
+                print(f"🗑️  Deleted collection '{cfg.collection_name}'")
+            except Exception:
+                print(f"ℹ️  Collection '{cfg.collection_name}' not found — starting fresh")
+
+        config = IngestConfig()
+        pipeline = build_ingest_pipeline(config, use_qdrant=use_qdrant, skip_qdrant_check=args.clear)
+        results = pipeline.run_embedding(Path(args.input), use_qdrant=use_qdrant)
+        indexed = sum(1 for r in results if r.updated)
+        print(f"✅ Embedded {indexed:,} documents")
 
     elif args.command == "query":
         result = process_query(args.question, use_llm=not args.no_llm)
