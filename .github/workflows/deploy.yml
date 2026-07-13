@@ -83,6 +83,14 @@ jobs:
             # Cleanup old images
             docker image prune -f
 
+            # Verify Qdrant became healthy
+            echo "Checking Qdrant health..."
+            if ! docker compose ps qdrant | grep -q healthy; then
+              echo "ERROR: Qdrant is not healthy"
+              docker logs rag-qdrant --tail 100
+              exit 1
+            fi
+
             # Health check (indexer may take several minutes on first deploy)
             echo "Waiting for API to be healthy..."
             for i in $(seq 1 180); do
@@ -90,7 +98,21 @@ jobs:
                 echo "API is healthy"
                 break
               fi
+              if [ $((i % 12)) -eq 0 ]; then
+                echo "  ...still waiting ($((i * 5))s elapsed)"
+              fi
               sleep 5
             done
+
+            if ! curl -fsS http://localhost:8000/api/health > /dev/null 2>&1; then
+              echo "ERROR: API did not become healthy within 15 minutes"
+              echo "--- Qdrant logs ---"
+              docker logs rag-qdrant --tail 50
+              echo "--- Indexer logs ---"
+              docker logs rag-indexer --tail 100
+              echo "--- API logs ---"
+              docker logs rag-api --tail 100
+              exit 1
+            fi
 
             echo "Deployed! https://${{ env.DOMAIN }}"
