@@ -29,8 +29,9 @@ docs
 *.md
 LICENSE
 
-# Data (mount at runtime)
-data
+# Data: include SQLite DB and BM25 vocab in image, exclude eval/benchmarks
+data/eval
+data/benchmarks
 *.csv
 *.parquet
 *.snapshot

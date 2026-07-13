@@ -1,8 +1,7 @@
-# Frontend Architecture (v1)
+# Frontend
 
-React 19 + Vite 8 + Tailwind CSS v4
-
-> **v1**: Chat UI kết nối backend qua SSE streaming. Client-side conversation memory.
+Frontend của Vietnam Tourism RAG được xây dựng bằng **React 19 + Vite 8 +
+Tailwind CSS v4**.
 
 ## Cấu trúc
 
@@ -10,15 +9,16 @@ React 19 + Vite 8 + Tailwind CSS v4
 frontend/
 ├── src/
 │   ├── api/
-│   │   └── client.ts       # SSE streaming client
+│   │   └── client.ts       # Client gọi API và xử lý SSE streaming
 │   ├── components/
-│   │   ├── ChatInput.tsx    # Input + suggestions
-│   │   ├── MessageBubble.tsx # User/Assistant bubbles
-│   │   └── CitationCard.tsx # Source citations
+│   │   ├── ChatInput.tsx    # Input và nút gửi
+│   │   ├── MessageBubble.tsx # Bong bóng tin nhắn user/assistant
+│   │   └── CitationCard.tsx # Thẻ trích dẫn nguồn
 │   ├── hooks/
-│   │   └── useChat.ts      # Chat state management
-│   ├── types.ts            # TypeScript types
-│   ├── App.tsx             # Main layout
+│   │   └── useChat.ts      # Quản lý state chat
+│   ├── types/
+│   │   └── index.ts        # TypeScript types
+│   ├── App.tsx             # Layout chính
 │   ├── main.tsx            # Entry point
 │   └── index.css           # Tailwind + custom styles
 ├── index.html
@@ -29,48 +29,66 @@ frontend/
 ## Components
 
 ### ChatInput
-- Auto-expanding textarea
-- Horizontal scroll suggestions (mobile)
-- Arrow send button with loading spinner
+- Textarea tự động mở rộng theo nội dung.
+- Nút gửi và trạng thái loading.
 
 ### MessageBubble
-- User: gray bubble, right-aligned (iMessage style)
-- Assistant: plain text, left-aligned (ChatGPT style)
-- Streaming indicator while loading
+- User: bong bóng xám, căn phải.
+- Assistant: văn bản thuần, căn trái.
+- Hiển thị thông báo progress (rewrite, retrieval, context, generation).
+- Indicator động khi đang streaming.
 
 ### CitationCard
-- Numbered source tags [1] [2] [3]
-- Wikipedia links
-- Confidence scores
+- Tag nguồn đánh số `[1]`, `[2]`, ...
+- Hiển thị tiêu đề chunk khi hover.
 
-## SSE Streaming
+## Kết nối API
 
-Client kết nối đến `/api/chat/stream?question=...` và nhận events:
+Frontend chỉ gọi hai endpoint chính:
+
+- `GET /api/health` — kiểm tra server.
+- `POST /api/chat/stream` — streaming câu trả lời qua SSE.
+
+Các SSE events từ backend:
 
 ```typescript
+// Progress event
+{ type: "progress", step: "rewrite", message: "Đang viết lại câu hỏi..." }
+
 // Token event
-{ type: "token", content: "Hello" }
+{ type: "token", content: "Vịnh Hạ Long" }
 
 // Done event
-{ type: "done", answer: "...", citations: [...], confidence: 0.8 }
+{ type: "done", answer: "...", sources: [...], intent: "factual" }
+
+// Error event
+{ type: "error", message: "Không đủ thông tin..." }
 ```
 
-## Responsive Design
+Trong development, Vite dev server proxy `/api` về backend tại
+`http://localhost:8000`.
 
-| Breakpoint | Width | Layout |
-|------------|-------|--------|
-| Mobile | < 640px | Horizontal scroll suggestions |
-| Tablet | 640-1024px | Wrap suggestions |
-| Desktop | > 1024px | Max-width 768px centered |
-
-## Build
+## Chạy local
 
 ```bash
-# Development
+cd frontend
+npm install
 npm run dev    # → http://localhost:5173
-
-# Production
-npm run build  # → dist/
 ```
 
-Production build được serve bởi FastAPI (không cần Nginx).
+Backend cần chạy trước:
+
+```bash
+python -m rag_pipeline.api.app
+```
+
+## Build production
+
+```bash
+cd frontend
+npm run build
+```
+
+Thư mục `frontend/dist/` được FastAPI serve tại root path (`/`). Khi deploy
+qua Docker, multi-stage build trong `Dockerfile` sẽ tự động build frontend và
+sao chép `dist/` vào image backend.

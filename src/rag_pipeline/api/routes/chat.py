@@ -8,148 +8,107 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from rag_pipeline.api.dependencies import get_rag_pipeline
 from rag_pipeline.api.schemas import (
-    ChatHistoryEntry,
     ChatRequest,
     ChatResponse,
-    CitationResponse,
+    SourceResponse,
 )
+from rag_pipeline.generation import RAGPipeline
+from rag_pipeline.generation.models import AnswerResult, GenerationEvent
 
 router = APIRouter(tags=["chat"])
-
 _executor = ThreadPoolExecutor(max_workers=4)
-_pipeline = None
 
 
-def _get_pipeline() -> Any:
-    global _pipeline
-    if _pipeline is None:
-        from rag_pipeline.main import build_ask_pipeline
-        _pipeline = build_ask_pipeline()
-    return _pipeline
-
-
-def _format_citations(result: Any) -> list[CitationResponse]:
-    return [
-        CitationResponse(
-            doc_id=c.doc_id or "",
-            title=c.title or "Wikipedia",
-            url=c.source_url or "",
-            score=c.confidence,
-        )
-        for c in result.citations
-    ]
+def _to_source_response(source: dict[str, Any]) -> SourceResponse:
+    return SourceResponse(
+        citation=source.get("citation", ""),
+        title=source.get("title", ""),
+        content=source.get("content", ""),
+        chunk_id=source.get("chunk_id", ""),
+    )
 
 
 # ─── Non-streaming ────────────────────────────────────────────────────────────
 
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    pipeline = _get_pipeline()
+async def chat(
+    request: ChatRequest,
+    pipeline: RAGPipeline = Depends(get_rag_pipeline),
+) -> ChatResponse:
+    """Answer a single question and return the full response."""
     loop = asyncio.get_event_loop()
     start = time.perf_counter()
-    history = [{"role": h.role, "content": h.content} for h in request.history]
-    result = await loop.run_in_executor(
-        _executor, pipeline.ask, request.question, history
-    )
+    result: AnswerResult = await loop.run_in_executor(_executor, pipeline.answer, request.question)
     latency_ms = (time.perf_counter() - start) * 1000
     return ChatResponse(
         answer=result.answer,
-        citations=_format_citations(result),
-        confidence=result.confidence,
+        sources=[_to_source_response(s) for s in result.sources],
+        intent=result.intent or "",
         latency_ms=round(latency_ms, 2),
     )
 
 
 # ─── SSE Streaming ───────────────────────────────────────────────────────────
 
+
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
-    """Stream answer tokens via SSE.
-
-    Accepts question + conversation history via POST body.
-    """
-    pipeline = _get_pipeline()
-    queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+async def chat_stream(
+    request: ChatRequest,
+    pipeline: RAGPipeline = Depends(get_rag_pipeline),
+) -> StreamingResponse:
+    """Stream answer tokens and progress events via SSE."""
+    queue: asyncio.Queue[GenerationEvent | None] = asyncio.Queue()
     loop = asyncio.get_event_loop()
-    question = request.question
-    history = [{"role": h.role, "content": h.content} for h in request.history]
 
-    def _run():
+    def _run() -> None:
         try:
-            t0 = time.perf_counter()
-
-            # Query processing: full rewrite when history present (for pronoun resolution),
-            # fast mode when no history (skip LLM rewrite for speed)
-            if history:
-                processed = pipeline._run_query_processing(question, history=history)
-            else:
-                processed = pipeline._run_query_processing_fast(question)
-            t1 = time.perf_counter()
-            print(f"[STREAM] Query: {(t1-t0)*1000:.0f}ms")
-
-            # Retrieval
-            retrieval = pipeline._run_retrieval(processed)
-            t2 = time.perf_counter()
-            print(f"[STREAM] Retrieval: {(t2-t1)*1000:.0f}ms")
-
-            # Stream tokens (with history)
-            chunk_gen, build_result = pipeline.answer_generator.generate_stream(
-                retrieval, history=history
-            )
-
-            full = ""
-            for chunk in chunk_gen:
-                full += chunk
-                asyncio.run_coroutine_threadsafe(queue.put(("token", chunk)), loop)
-
-            t3 = time.perf_counter()
-            print(f"[STREAM] LLM: {(t3-t2)*1000:.0f}ms")
-
-            # Build result + guardrails
-            result = build_result(full)
-            checked = pipeline._run_output_guardrails(result, retrieval)
-
-            print(f"[STREAM] Total: {(time.perf_counter()-t0)*1000:.0f}ms")
-
-            done = {
-                "type": "done",
-                "answer": checked.answer,
-                "citations": [
-                    {"doc_id": c.doc_id or "", "title": c.title or "Wikipedia",
-                     "url": c.source_url or "", "score": round(c.confidence, 4)}
-                    for c in checked.citations
-                ],
-                "confidence": round(checked.confidence, 4),
-            }
-            asyncio.run_coroutine_threadsafe(queue.put(("done", json.dumps(done, ensure_ascii=False))), loop)
-
-        except Exception as e:
-            asyncio.run_coroutine_threadsafe(
-                queue.put(("error", json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False))),
-                loop,
-            )
+            for event in pipeline.answer_stream(request.question):
+                asyncio.run_coroutine_threadsafe(queue.put(event), loop)
         finally:
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
 
     _executor.submit(_run)
 
-    async def generate():
+    async def _generate() -> Any:
         while True:
-            item = await queue.get()
-            if item is None:
+            event = await queue.get()
+            if event is None:
                 break
-            etype, data = item
-            if etype == "token":
-                yield f"data: {json.dumps({'type': 'token', 'content': data}, ensure_ascii=False)}\n\n"
-            else:
-                yield f"data: {data}\n\n"
+            payload = _event_to_payload(event)
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
-        generate(),
+        _generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
+
+
+def _event_to_payload(event: GenerationEvent) -> dict[str, Any]:
+    if event.type == "progress":
+        return {
+            "type": "progress",
+            "step": event.step,
+            "message": event.message,
+        }
+    if event.type == "token":
+        return {"type": "token", "content": event.data}
+    if event.type == "done":
+        result: AnswerResult = event.data
+        return {
+            "type": "done",
+            "answer": result.answer,
+            "sources": result.sources,
+            "intent": result.intent or "",
+        }
+    return {"type": "error", "message": event.message or "Unknown error"}

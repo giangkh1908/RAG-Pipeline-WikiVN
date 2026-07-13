@@ -1,15 +1,12 @@
-import type { ChatHistoryEntry, ChatResponse, StreamEvent } from '../types';
+import type { ChatResponse, StreamEvent } from '../types';
 
 const API_BASE = '';
 
-export async function chat(
-  question: string,
-  history: ChatHistoryEntry[] = [],
-): Promise<ChatResponse> {
+export async function chat(question: string): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify({ question }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -18,12 +15,11 @@ export async function chat(
 export async function chatStream(
   question: string,
   onEvent: (event: StreamEvent) => void,
-  history: ChatHistoryEntry[] = [],
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify({ question }),
   });
 
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -52,7 +48,7 @@ export async function chatStream(
   }
 }
 
-export async function healthCheck(): Promise<{ status: string; qdrant_connected: boolean }> {
+export async function healthCheck(): Promise<{ status: string; qdrant: string }> {
   const res = await fetch(`${API_BASE}/api/health`);
   return res.json();
 }

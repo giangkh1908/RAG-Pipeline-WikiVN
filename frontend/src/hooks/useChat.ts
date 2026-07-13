@@ -1,24 +1,9 @@
 import { useState, useCallback } from 'react';
-import type { ChatHistoryEntry, Message, StreamEvent } from '../types';
+import type { Message, StreamEvent } from '../types';
 import { chatStream } from '../api/client';
 
 let msgId = 0;
 const nextId = () => `msg-${++msgId}`;
-
-const MAX_HISTORY_TURNS = 5;
-
-function extractHistory(messages: Message[]): ChatHistoryEntry[] {
-  // Take last N completed turns (user + assistant pairs)
-  const completed = messages.filter(m => !m.isStreaming);
-  const history: ChatHistoryEntry[] = [];
-  for (const m of completed) {
-    if (m.role === 'user' || (m.role === 'assistant' && m.content)) {
-      history.push({ role: m.role, content: m.content });
-    }
-  }
-  // Limit to last MAX_HISTORY_TURNS * 2 entries (user + assistant per turn)
-  return history.slice(-(MAX_HISTORY_TURNS * 2));
-}
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -38,16 +23,21 @@ export function useChat() {
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
 
-    // Extract history from previous messages (before adding new ones)
-    const history = extractHistory(messages);
-
     try {
       await chatStream(question, (event: StreamEvent) => {
-        if (event.type === 'token') {
+        if (event.type === 'progress') {
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantMsg.id
-                ? { ...m, content: m.content + event.content }
+                ? { ...m, progress: event.message }
+                : m,
+            ),
+          );
+        } else if (event.type === 'token') {
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === assistantMsg.id
+                ? { ...m, content: m.content + event.content, progress: undefined }
                 : m,
             ),
           );
@@ -57,27 +47,37 @@ export function useChat() {
               m.id === assistantMsg.id
                 ? {
                     ...m,
-                    citations: event.citations,
-                    confidence: event.confidence,
+                    content: event.answer,
+                    sources: event.sources,
+                    intent: event.intent,
                     isStreaming: false,
+                    progress: undefined,
                   }
                 : m,
             ),
           );
+        } else if (event.type === 'error') {
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === assistantMsg.id
+                ? { ...m, content: event.message, isStreaming: false, progress: undefined }
+                : m,
+            ),
+          );
         }
-      }, history);
+      });
     } catch {
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantMsg.id
-            ? { ...m, content: 'Lỗi kết nối server.', isStreaming: false }
+            ? { ...m, content: 'Lỗi kết nối server.', isStreaming: false, progress: undefined }
             : m,
         ),
       );
     } finally {
       setIsStreaming(false);
     }
-  }, [isStreaming, messages]);
+  }, [isStreaming]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);

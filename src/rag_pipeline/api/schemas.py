@@ -1,4 +1,4 @@
-"""Pydantic schemas for API request/response models."""
+"""Pydantic schemas for the RAG API."""
 
 from __future__ import annotations
 
@@ -6,51 +6,39 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
-# ─── Request ────────────────────────────────────────────────────────────────────
-
-class ChatHistoryEntry(BaseModel):
-    """A single turn in conversation history."""
-
-    role: Literal["user", "assistant"] = Field(..., description="Message role")
-    content: str = Field(..., min_length=1, max_length=2000, description="Message content")
+# ─── Request ──────────────────────────────────────────────────────────────────
 
 
 class ChatRequest(BaseModel):
-    """Request body for chat endpoint."""
+    """Request body for chat endpoints."""
 
-    question: str = Field(..., min_length=1, max_length=1000, description="User question")
-    history: list[ChatHistoryEntry] = Field(default_factory=list, description="Conversation history (last N turns)")
-    use_reranker: bool = Field(default=False, description="Use Cohere re-ranker")
-    use_llm: bool = Field(default=True, description="Use LLM for query rewrite")
-
-
-class EvalRequest(BaseModel):
-    """Request body for eval endpoint."""
-
-    dataset: str = Field(default="documents/eval.csv", description="Eval dataset path")
-    limit: int = Field(default=50, ge=1, le=500, description="Max samples to evaluate")
-    use_qdrant: bool = Field(default=True, description="Use Qdrant vector store")
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Câu hỏi của ngườ i dùng",
+    )
 
 
-# ─── Response ───────────────────────────────────────────────────────────────────
+# ─── Response ─────────────────────────────────────────────────────────────────
 
-class CitationResponse(BaseModel):
-    """Citation in chat response."""
 
-    doc_id: str = Field(default="", description="Document ID")
-    title: str = Field(..., description="Source article title")
-    url: str = Field(default="", description="Wikipedia URL")
-    score: float = Field(default=0.0, ge=0.0, le=1.0, description="Relevance score")
+class SourceResponse(BaseModel):
+    """A single source citation returned to the frontend."""
+
+    citation: str = Field(..., description="Nhãn trích dẫn, ví dụ [1]")
+    title: str = Field(default="", description="Tiêu đề nguồn")
+    content: str = Field(default="", description="Nội dung chunk gốc")
+    chunk_id: str = Field(default="", description="ID của chunk")
 
 
 class ChatResponse(BaseModel):
-    """Response body for non-streaming chat endpoint."""
+    """Response body for the non-streaming chat endpoint."""
 
-    answer: str = Field(..., description="Generated answer")
-    citations: list[CitationResponse] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    latency_ms: float = Field(default=0.0, description="Total latency in milliseconds")
+    answer: str = Field(..., description="Câu trả lờ i được sinh ra")
+    sources: list[SourceResponse] = Field(default_factory=list)
+    intent: str = Field(default="", description="Intent được phân loại")
+    latency_ms: float = Field(default=0.0, description="Tổng latency (ms)")
 
 
 class HealthResponse(BaseModel):
@@ -58,39 +46,41 @@ class HealthResponse(BaseModel):
 
     status: Literal["ok", "degraded", "error"] = "ok"
     qdrant: Literal["connected", "disconnected"] = "connected"
-    langsmith: Literal["enabled", "disabled"] = "disabled"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
 
 
-class EvalResponse(BaseModel):
-    """Response body for eval endpoint."""
-
-    scores: dict[str, float] = Field(default_factory=dict)
-    latency: dict[str, float] = Field(default_factory=dict)
-    sample_count: int = 0
-    passed: bool = False
+# ─── SSE Stream ───────────────────────────────────────────────────────────────
 
 
-# ─── SSE Stream ─────────────────────────────────────────────────────────────────
+class StreamProgress(BaseModel):
+    """Progress event emitted during pipeline execution."""
+
+    type: Literal["progress"] = "progress"
+    step: str
+    message: str
+
 
 class StreamToken(BaseModel):
-    """SSE token chunk."""
+    """Token event emitted by the LLM."""
 
     type: Literal["token"] = "token"
     content: str
 
 
 class StreamDone(BaseModel):
-    """SSE done signal with citations."""
+    """Done event with the final answer and sources."""
 
     type: Literal["done"] = "done"
-    answer: str = ""
-    citations: list[CitationResponse] = Field(default_factory=list)
-    confidence: float = 0.0
+    answer: str
+    sources: list[SourceResponse] = Field(default_factory=list)
+    intent: str = ""
 
 
 class StreamError(BaseModel):
-    """SSE error signal."""
+    """Error event when the pipeline fails."""
 
     type: Literal["error"] = "error"
     message: str
+
+
+StreamEvent = StreamProgress | StreamToken | StreamDone | StreamError

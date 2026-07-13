@@ -1,7 +1,25 @@
-"""Phase 4: Generation — prompt building, answer generation, output guardrails."""
+"""Generation components for RAG answer production."""
 
-from rag_pipeline.generation.answer_generator import AnswerGenerator
-from rag_pipeline.generation.output_guardrails import OutputGuardrails
-from rag_pipeline.generation.prompt_builder import PromptBuilder
+from rag_pipeline.generation.answer_generator import LLMAnswerGenerator
+from rag_pipeline.generation.context_builder import (
+    CitationContextBuilder,
+    NoRelevantContextError,
+)
+from rag_pipeline.generation.models import (
+    AnswerResult,
+    BuiltContext,
+    GeneratedAnswer,
+    GenerationEvent,
+)
+from rag_pipeline.generation.rag_pipeline import RAGPipeline
 
-__all__ = ["AnswerGenerator", "OutputGuardrails", "PromptBuilder"]
+__all__ = [
+    "AnswerResult",
+    "BuiltContext",
+    "CitationContextBuilder",
+    "GenerationEvent",
+    "GeneratedAnswer",
+    "LLMAnswerGenerator",
+    "NoRelevantContextError",
+    "RAGPipeline",
+]

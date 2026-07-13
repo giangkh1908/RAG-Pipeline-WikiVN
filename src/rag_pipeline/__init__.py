@@ -1,2 +1,1 @@
-"""Wikipedia Vietnamese RAG pipeline package."""
-
+"""RAG pipeline package."""

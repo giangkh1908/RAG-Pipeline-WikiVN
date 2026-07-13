@@ -1,143 +1,88 @@
-"""Tests for FastAPI API endpoints."""
+"""Tests for the FastAPI RAG endpoints."""
 
 from __future__ import annotations
 
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from rag_pipeline.api.app import app
+from rag_pipeline.api.dependencies import PipelineStore
+from rag_pipeline.generation.models import AnswerResult, GenerationEvent
 
 
 @pytest.fixture
-def client():
-    """Create test client."""
+def client() -> TestClient:
     return TestClient(app)
 
 
-class TestHealthEndpoint:
-    """Tests for GET /api/health."""
+@pytest.fixture
+def mock_pipeline() -> MagicMock:
+    pipeline = MagicMock()
+    result = AnswerResult(
+        query="Ha Long Bay ở đâu?",
+        answer="Vịnh Hạ Long nằm ở Quảng Ninh.",
+        context="Context",
+        sources=[
+            {
+                "citation": "[1]",
+                "title": "Vịnh Hạ Long",
+                "content": "Nội dung",
+                "chunk_id": str(uuid4()),
+            }
+        ],
+        intent="factual",
+    )
+    pipeline.answer.return_value = result
+    pipeline.answer_stream.return_value = [
+        GenerationEvent(type="progress", step="rewrite", message="Rewriting..."),
+        GenerationEvent(type="token", data="Vịnh "),
+        GenerationEvent(type="token", data="Hạ Long"),
+        GenerationEvent(type="done", data=result),
+    ]
+    return pipeline
 
-    def test_health_returns_200(self, client):
+
+def test_health_endpoint(client: TestClient) -> None:
+    with patch("rag_pipeline.api.routes.health.httpx.AsyncClient") as mock_client_class:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_class.return_value.__aexit__ = AsyncMock(return_value=False)
+
         response = client.get("/api/health")
-        assert response.status_code == 200
 
-    def test_health_response_format(self, client):
-        response = client.get("/api/health")
-        data = response.json()
-        assert "status" in data
-        assert "qdrant" in data
-        assert "langsmith" in data
-        assert "version" in data
-
-    def test_health_status_values(self, client):
-        response = client.get("/api/health")
-        data = response.json()
-        assert data["status"] in ["ok", "degraded", "error"]
-        assert data["qdrant"] in ["connected", "disconnected"]
-        assert data["langsmith"] in ["enabled", "disabled"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["qdrant"] == "connected"
 
 
-class TestRootEndpoint:
-    """Tests for GET /."""
+def test_chat_non_streaming(client: TestClient, mock_pipeline: MagicMock) -> None:
+    with patch.object(PipelineStore, "get_pipeline", return_value=mock_pipeline):
+        response = client.post("/api/chat", json={"question": "Ha Long Bay ở đâu?"})
 
-    def test_root_returns_200(self, client):
-        response = client.get("/")
-        assert response.status_code == 200
-
-    def test_root_response_format(self, client):
-        response = client.get("/")
-        content_type = response.headers.get("content-type", "")
-        if "text/html" in content_type:
-            # Frontend is built — root serves index.html
-            assert response.status_code == 200
-        else:
-            data = response.json()
-            assert "name" in data
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer"] == "Vịnh Hạ Long nằm ở Quảng Ninh."
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["citation"] == "[1]"
+    assert data["intent"] == "factual"
 
 
-class TestChatEndpoint:
-    """Tests for POST /api/chat."""
+def test_chat_streaming(client: TestClient, mock_pipeline: MagicMock) -> None:
+    with patch.object(PipelineStore, "get_pipeline", return_value=mock_pipeline):
+        response = client.post("/api/chat/stream", json={"question": "Ha Long Bay ở đâu?"})
 
-    def test_chat_returns_200(self, client):
-        response = client.post("/api/chat", json={"question": "Test?"})
-        assert response.status_code == 200
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
 
-    def test_chat_response_format(self, client):
-        response = client.post("/api/chat", json={"question": "Test?"})
-        data = response.json()
-        assert "answer" in data
-        assert "citations" in data
-        assert "confidence" in data
-        assert "latency_ms" in data
-
-    def test_chat_empty_question_rejected(self, client):
-        response = client.post("/api/chat", json={"question": ""})
-        assert response.status_code == 422  # Validation error
-
-    def test_chat_missing_question_rejected(self, client):
-        response = client.post("/api/chat", json={})
-        assert response.status_code == 422
-
-    def test_chat_with_history(self, client):
-        response = client.post("/api/chat", json={
-            "question": "Dân số bao nhiêu?",
-            "history": [
-                {"role": "user", "content": "Thủ đô Việt Nam ở đâu?"},
-                {"role": "assistant", "content": "Thủ đô Việt Nam là Hà Nội."},
-            ],
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert "answer" in data
-
-
-class TestChatStreamEndpoint:
-    """Tests for POST /api/chat/stream."""
-
-    def test_stream_returns_200(self, client):
-        response = client.post("/api/chat/stream", json={"question": "Test"})
-        assert response.status_code == 200
-
-    def test_stream_content_type(self, client):
-        response = client.post("/api/chat/stream", json={"question": "Test"})
-        assert "text/event-stream" in response.headers["content-type"]
-
-    def test_stream_has_data(self, client):
-        response = client.post("/api/chat/stream", json={"question": "Test"})
-        content = response.text
-        assert "data:" in content
-
-    def test_stream_empty_question_rejected(self, client):
-        response = client.post("/api/chat/stream", json={"question": ""})
-        assert response.status_code == 422
-
-    def test_stream_with_history(self, client):
-        response = client.post("/api/chat/stream", json={
-            "question": "Dân số bao nhiêu?",
-            "history": [
-                {"role": "user", "content": "Thủ đô Việt Nam ở đâu?"},
-                {"role": "assistant", "content": "Thủ đô Việt Nam là Hà Nội."},
-            ],
-        })
-        assert response.status_code == 200
-        assert "data:" in response.text
-
-
-class TestEvalEndpoint:
-    """Tests for POST /api/eval."""
-
-    def test_eval_returns_200(self, client):
-        pytest.importorskip("ragas")
-        response = client.post("/api/eval", json={})
-        assert response.status_code == 200
-
-    def test_eval_response_format(self, client):
-        pytest.importorskip("ragas")
-        response = client.post("/api/eval", json={})
-        data = response.json()
-        assert "scores" in data
-        assert "latency" in data
-        assert "sample_count" in data
-        assert "passed" in data
+    body = response.text
+    assert 'type"' in body and "progress" in body
+    assert "Vịnh " in body
+    assert "Hạ Long" in body
+    assert "done" in body

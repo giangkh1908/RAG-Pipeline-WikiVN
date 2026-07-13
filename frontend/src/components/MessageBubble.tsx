@@ -23,10 +23,15 @@ export function MessageBubble({ message }: Props) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[90%] space-y-2.5 sm:max-w-[85%] sm:space-y-3">
+        {/* Progress hint */}
+        {message.isStreaming && message.progress && (
+          <p className="text-xs text-gray-400">{message.progress}</p>
+        )}
+
         {/* Answer text */}
         <div className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
           {message.content}
-          {message.isStreaming && message.content.length === 0 && (
+          {message.isStreaming && message.content.length === 0 && !message.progress && (
             <span className="inline-flex gap-1 py-1">
               <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:0ms]"></span>
               <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]"></span>
@@ -38,11 +43,11 @@ export function MessageBubble({ message }: Props) {
           )}
         </div>
 
-        {/* Citations */}
-        {!message.isStreaming && message.citations && message.citations.length > 0 && (
+        {/* Sources */}
+        {!message.isStreaming && message.sources && message.sources.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {message.citations.map((c, i) => (
-              <CitationCard key={i} citation={c} index={i + 1} />
+            {message.sources.map((source, i) => (
+              <CitationCard key={i} source={source} index={i + 1} />
             ))}
           </div>
         )}

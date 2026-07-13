@@ -6,10 +6,10 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-  'Python là gì?',
-  'Lịch sử Việt Nam',
-  'Ronaldo có bao nhiêu quả bóng vàng?',
-  'Trái Đất cách Mặt Trời bao xa?',
+  'Vịnh Hạ Long nằm ở đâu?',
+  'Du lịch Hội An nên đi mùa nào?',
+  'Có món ăn đặc sản nào ở Đà Nẵng?',
+  'Nha Trang có bãi biển nổi tiếng nào?',
 ];
 
 export function ChatInput({ onSend, disabled }: Props) {
@@ -96,7 +96,7 @@ export function ChatInput({ onSend, disabled }: Props) {
         </div>
 
         <p className="mt-1.5 text-center text-[11px] text-gray-400 sm:mt-2">
-          Tìm kiếm từ 1.1 triệu bài viết Wikipedia tiếng Việt
+          Hỏi đáp về du lịch Việt Nam
         </p>
       </div>
     </div>

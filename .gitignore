@@ -30,6 +30,8 @@ index/
 # Data files (large)
 documents/
 document/
+data/*.db
+data/bm25_vocab.json
 
 # Logs
 *.log

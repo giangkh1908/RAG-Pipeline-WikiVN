@@ -20,9 +20,29 @@ services:
       start_period: 30s
 
   # ============================================
+  # One-time indexer: populates Qdrant on first deploy
+  # ============================================
+  indexer:
+    build: .
+    image: ghcr.io/giangkh1908/rag-pipeline-wikivn:latest
+    container_name: rag-indexer
+    env_file:
+      - .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - rag_data:/app/data
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    command: ["python", "scripts/init_deployment.py"]
+    restart: "no"
+
+  # ============================================
   # RAG API + Frontend
   # ============================================
   api:
+    build: .
     image: ghcr.io/giangkh1908/rag-pipeline-wikivn:latest
     container_name: rag-api
     ports:
@@ -31,10 +51,17 @@ services:
       - .env
     environment:
       - QDRANT_URL=http://qdrant:6333
+    volumes:
+      # Persist query-cache updates to SQLite across restarts.
+      # On first run Docker initializes the volume with files from the image.
+      - rag_data:/app/data
     depends_on:
       qdrant:
         condition: service_healthy
+      indexer:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
+  rag_data:

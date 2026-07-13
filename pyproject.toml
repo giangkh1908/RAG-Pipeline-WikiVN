@@ -1,25 +1,41 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "legal-rag-pipeline"
-version = "0.1.0"
-description = "Production-first RAG pipeline scaffold for Vietnamese legal documents."
-readme = "PLAN.md"
+name = "rag-pipeline"
+version = "0.2.0"
+description = "RAG pipeline with Qdrant hybrid retrieval"
 requires-python = ">=3.11"
-dependencies = ["python-dotenv>=1.0.0"]
+dependencies = [
+    "qdrant-client>=1.13.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.0.0",
+]
 
 [project.optional-dependencies]
-ingest = ["datasets>=2.20.0"]
-indexing = ["httpx>=0.27.0", "qdrant-client>=1.13.0,<1.14.0"]
-monitoring = ["langsmith>=0.9.0"]
-eval = ["ragas>=0.4.0", "litellm>=1.70.0"]
-api = ["fastapi>=0.115.0", "uvicorn[standard]>=0.34.0"]
-dev = ["pytest>=8.2.0", "httpx>=0.27.0"]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

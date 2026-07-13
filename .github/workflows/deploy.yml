@@ -7,6 +7,7 @@ on:
 
 env:
   IMAGE_NAME: ghcr.io/giangkh1908/rag-pipeline-wikivn
+  DOMAIN: wikivn.top
 
 jobs:
   build:
@@ -37,7 +38,6 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          # Docker layer caching
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -55,16 +55,14 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Create directory if not exists
+            set -e
             mkdir -p /opt/rag
             cd /opt/rag
 
-            # Download docker-compose.yml if not exists
-            if [ ! -f docker-compose.yml ]; then
-              wget -q https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main/docker-compose.yml
-            fi
+            # Always download the latest compose file from the repo
+            wget -q -O docker-compose.yml https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main/docker-compose.yml
 
-            # Create .env if not exists
+            # Create .env if it does not exist
             if [ ! -f .env ]; then
               echo "OPENROUTER_API_KEY=your-key-here" > .env
               echo "QDRANT_URL=http://qdrant:6333" >> .env
@@ -75,14 +73,24 @@ jobs:
             # Login GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Pull image
+            # Pull the latest image
             docker pull ${{ env.IMAGE_NAME }}:latest
 
-            # Restart
-            docker-compose down
-            docker-compose up -d
+            # Restart services
+            docker compose down
+            docker compose up -d
 
             # Cleanup old images
             docker image prune -f
 
-            echo "Deployed! http://$(curl -s ifconfig.me):8000"
+            # Health check (indexer may take several minutes on first deploy)
+            echo "Waiting for API to be healthy..."
+            for i in $(seq 1 180); do
+              if curl -fsS http://localhost:8000/api/health > /dev/null 2>&1; then
+                echo "API is healthy"
+                break
+              fi
+              sleep 5
+            done
+
+            echo "Deployed! https://${{ env.DOMAIN }}"

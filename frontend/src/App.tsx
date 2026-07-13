@@ -17,7 +17,7 @@ export default function App() {
       <header className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5
                          sm:px-6">
         <h1 className="text-sm font-semibold text-gray-800 sm:text-base">
-          Vietnamese Wikipedia RAG
+          Vietnam Tourism RAG
         </h1>
         {messages.length > 0 && (
           <button
@@ -46,7 +46,7 @@ export default function App() {
                 Hỏi bất cứ điều gì
               </p>
               <p className="mt-1 text-xs text-gray-400 sm:text-sm">
-                Tìm kiếm từ 1.1 triệu bài viết Wikipedia tiếng Việt
+                Hỏi đáp về du lịch Việt Nam
               </p>
             </div>
           )}

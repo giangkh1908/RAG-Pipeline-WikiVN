@@ -1,195 +1,153 @@
-# Retrieval Pipeline (Phase 3) — v1
+# Retrieval
 
-## Tổng quan
+Tầng retrieval chịu trách nhiệm tìm kiếm các đoạn văn bản (chunks) liên quan đến câu hỏi của người dùng từ Qdrant. Hệ thống sử dụng kết hợp tìm kiếm ngữ nghĩa (dense) và tìm kiếm từ khóa (sparse), sau đó hợp nhất kết quả bằng Reciprocal Rank Fusion.
 
-> **v1**: Hybrid search (dense + BM25) → RRF fusion → Cohere re-rank. Single query, không có multi-step.
+---
 
-Hybrid search (dense + BM25) → RRF fusion → Cohere re-rank → top-k results.
+## Kiến trúc tổng quan
 
-## Pipeline flow
-
-```
-ProcessedQuery (từ Phase 2)
-    ├─ Dense search: embed rewrite_query → Qdrant top_k=50
-    ├─ BM25 search: bm25_query → BM25 index top_k=50
-    └─ RRF fusion: merge 2 kết quả → top_k=20
-    → Cohere Re-ranker: re-rank top 20 → top 5
-    → RetrievalResult (passages + context)
-```
-
-## Cấu trúc thư mục
-
-```
-src/rag_pipeline/
-├── config.py                    # RetrievalConfig
-├── models.py                    # Passage, RetrievalResult
-├── indexing/
-│   ├── bm25_index.py            # BM25 build/search/save/load
-│   ├── rrf.py                   # Reciprocal Rank Fusion
-│   ├── reranker.py              # CohereReranker, BGEReranker, TestReranker
-│   └── vector_store.py          # + search() method
-└── pipelines/
-    └── retrieval_pipeline.py    # RetrievalPipeline orchestrator
+```text
+Raw query
+    ↓
+Query Preprocessing
+    - Normalize
+    - LLM Rewrite
+    - Intent Classification
+    - Filter Building
+    ↓
+Hybrid Search
+    - Dense search (OpenRouter embedding)
+    - Sparse search (Classic BM25)
+    ↓
+RRF Fusion
+    ↓
+Ranked RetrievalResult[]
 ```
 
-## Components
+---
 
-### 1. Dense Vector Search (`indexing/vector_store.py`)
+## Phase 1: Hybrid Search Core
 
-- Embed `rewrite_query` bằng OpenRouter embedding (2048-dim)
-- Search Qdrant: cosine similarity, top_k=50
-- Implement `search()` trong `QdrantVectorStore` và `InMemoryVectorStore`
+### Dense Search
 
-### 2. BM25 Index (`indexing/bm25_index.py`)
+Sử dụng vector embedding dày đặc từ OpenRouter với model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Câu hỏi được embed thành vector 2048 chiều, sau đó tìm kiếm cosine similarity trong Qdrant.
 
-- Library: `rank_bm25` (BM25Okapi)
-- Tokenizer: underthesea (Vietnamese word segmentation), pyvi, hoặc simple (fallback)
-- Build index từ (chunk_id, text) pairs
-- Save/load pickle format
-- Search: trả về (chunk_id, score) pairs
+### Sparse Search
 
-### 3. RRF Fusion (`indexing/rrf.py`)
+Sử dụng Classic BM25 offline, không cần tải model từ HuggingFace. Tầng này xây dựng vocabulary và tính toán IDF từ toàn bộ corpus chunks, sau đó mã hóa câu hỏi thành sparse vector. Vocabulary được persist vào `data/bm25_vocab.json` để tái sử dụng khi query.
 
-Reciprocal Rank Fusion:
-```
-score(d) = Σ 1/(k + rank_i(d))
-```
-- k=60 (standard value)
-- Merge dense + BM25 results
-- Sort theo RRF score descending
+### RRF Fusion
 
-### 4. Cohere Re-ranker (`indexing/reranker.py`)
+Reciprocal Rank Fusion kết hợp thứ hạng từ dense và sparse search:
 
-API: `https://api.cohere.com/v2/rerank`
-
-**Config:**
-```python
-@dataclass
-class CohereReranker:
-    model_name: str = "rerank-v3.5"        # multilingual, hỗ trợ tiếng Việt
-    api_base: str = "https://api.cohere.com/v2/rerank"
-    api_key_env: str = "COHERE_API_KEY"
-    timeout_seconds: float = 30.0
-    max_retries: int = 3
+```text
+score(chunk) = 1 / (k + rank_dense) + 1 / (k + rank_sparse)
 ```
 
-**Free tier:** 100 search units/tháng
+Trong đó `k` là hyperparameter, mặc định là 60. Các chunk xuất hiện trong cả hai kết quả sẽ được ưu tiên cao hơn.
 
-**Request:**
-```json
-{
-    "model": "rerank-v3.5",
-    "query": "Thủ đô Việt Nam ở đâu?",
-    "documents": ["passage 1", "passage 2", ...],
-    "top_n": 5
-}
+### RetrievalResult
+
+Mỗi kết quả trả về bao gồm:
+- `chunk_id`: định danh UUID của chunk
+- `content`: nội dung văn bản đầy đủ
+- `rrf_score`: điểm sau khi hợp nhất
+- `rank`: thứ hạng cuối cùng
+- `dense_score`: điểm từ dense search (nếu có)
+- `sparse_score`: điểm từ sparse search (nếu có)
+- `metadata`: payload từ Qdrant bao gồm title, source_id, section_path, v.v.
+
+---
+
+## Phase 2: Query Preprocessing
+
+### Normalize
+
+Chuẩn hóa câu hỏi cơ bản: chuyển thành chữ thường, loại bỏ khoảng trắng thừa.
+
+### LLM Rewrite
+
+Sử dụng DeepSeek V4 Flash qua OpenRouter để viết lại câu hỏi cho phù hợp với retrieval. Quá trình này giúp:
+- Mở rộng từ viết tắt và thuật ngữ mơ hồ
+- Thêm từ khóa du lịch khi cần
+- Giữ nguyên ngôn ngữ tiếng Việt
+
+Prompt được viết bằng tiếng Việt để phù hợp với corpus.
+
+### Intent Classification
+
+Cùng một LLM call với rewrite, hệ thống phân loại intent thành một trong các loại:
+- `factual`: hỏi thông tin thực tế
+- `recommendation`: đề xuất, gợi ý
+- `comparison`: so sánh
+- `list`: danh sách
+- `procedural`: hướng dẫn
+### Filter Builder
+
+Dựa vào intent, hệ thống xây dựng Qdrant payload filters. Mặc định, các intent phổ biến sẽ loại trừ các reference sections để tránh kết quả không liên quan.
+
+### Query Cache
+
+Kết quả rewrite và intent được cache trong SQLite table `query_cache` để tránh gọi LLM lặp lại cho cùng một query. Cache key phụ thuộc vào model name, prompt version, và raw query text, giúp tự động invalidate khi model hoặc prompt thay đổi.
+
+Nếu LLM call thất bại, hệ thống fallback về normalized query với intent mặc định là `factual`.
+
+---
+
+## RetrievalPipeline
+
+`RetrievalPipeline` là wrapper cấp cao điều phối toàn bộ quy trình:
+
+```text
+query → QueryPreprocessor → FilterBuilder → HybridRetriever → RetrievalResult[]
 ```
 
-**Response:**
-```json
-{
-    "results": [
-        {"index": 3, "relevance_score": 0.999},
-        {"index": 0, "relevance_score": 0.850}
-    ]
-}
-```
+Pipeline giúp tách biệt rõ ràng giữa preprocessing và search, cho phép dễ dàng thay thế hoặc mở rộng từng thành phần trong tương lai.
 
-### 5. RetrievalPipeline (`pipelines/retrieval_pipeline.py`)
+---
 
-Orchestrator:
-```python
-@dataclass
-class RetrievalPipeline:
-    config: RetrievalConfig
-    embedder: Embedder
-    vector_store: VectorStore
-    bm25_index: BM25Index
-    reranker: CohereReranker | None = None
+## Cấu hình
 
-    def run(self, query: ProcessedQuery) -> RetrievalResult
-```
+Các tham số chính trong `RetrievalConfig`:
 
-## Config
+- `qdrant.dense_top_k`: số kết quả dense search
+- `qdrant.sparse_top_k`: số kết quả sparse search
+- `rrf_k`: hyperparameter của RRF
+- `rrf_top_k`: số kết quả cuối cùng
+- `llm_query.model_name`: model LLM cho rewrite/intent
+- `llm_query.prompt_version`: version prompt để cache invalidation
+- `llm_query.cache_ttl_days`: thời hạn cache
 
-```python
-@dataclass
-class RetrievalConfig:
-    # Dense search
-    dense_top_k: int = 50
-    # BM25 search
-    bm25_top_k: int = 50
-    bm25_index_path: Path = Path("index/bm25.pkl")
-    bm25_tokenizer: str = "underthesea"
-    # RRF fusion
-    rrf_k: int = 60
-    rrf_top_k: int = 20
-    # Cohere re-ranking
-    enable_rerank: bool = True
-    rerank_provider: str = "cohere"      # "cohere" or "bge"
-    rerank_model: str = "rerank-v3.5"
-    rerank_api_key_env: str = "COHERE_API_KEY"
-    # Score thresholds
-    min_score: float = 0.0
-```
+---
 
-## Output: RetrievalResult
+## Payload trong Qdrant
 
-```python
-@dataclass
-class Passage:
-    chunk_id: str
-    doc_id: str
-    title: str
-    text: str
-    source_url: str
-    dense_score: float      # cosine similarity
-    bm25_score: float       # BM25 score
-    rrf_score: float        # RRF fusion score
-    rerank_score: float     # Cohere relevance score
-    rank: int               # final rank (1-5)
+Mỗi point trong Qdrant lưu payload giàu metadata:
 
-@dataclass
-class RetrievalResult:
-    query: ProcessedQuery
-    passages: list[Passage]     # top 5 passages
-    context: str                # assembled context string
-    metadata: dict[str, Any]    # dense_count, bm25_count, fused_count
-```
+- `document_id`: UUID của document
+- `chunk_order`: thứ tự chunk trong document
+- `title`: tiêu đề topic/document
+- `source_id`: UUID của source
+- `section_path`: đường dẫn section
+- `is_reference_section`: cờ đánh dấu section tài liệu tham khảo
 
-## CLI
+Payload này hỗ trợ filtering và hiển thị nguồn cho câu trả lời.
 
-```powershell
-# Search with Cohere re-rank
-python -m rag_pipeline.main search --question "Thủ đô Việt Nam ở đâu?" --rerank
+---
 
-# Search without re-rank
-python -m rag_pipeline.main search --question "..."
+## Hạn chế hiện tại
 
-# Search with InMemory (test)
-python -m rag_pipeline.main search --question "..." --no-qdrant
-```
+- Tokenizer của Classic BM25 đơn giản, có thể gây false positive khi từ trong query là substring của từ khác (ví dụ: "sánh" trong "so sánh" match với "sánh bước").
+- Filter Builder còn đơn giản, chủ yếu loại trừ reference sections.
+- Intent classification phụ thuộc vào chất lượng output JSON của LLM.
 
-## Dependencies
+---
 
-```bash
-pip install rank-bm25        # BM25 Okapi
-pip install underthesea      # Vietnamese tokenizer (optional)
-pip install httpx            # HTTP client (already installed)
-```
+## Hướng phát triển
 
-## Environment Variables
-
-```env
-OPENROUTER_API_KEY=sk-or-...    # Embedding + LLM
-COHERE_API_KEY=...              # Re-ranker
-```
-
-## Tests
-
-| File | Tests | Coverage |
-|------|-------|----------|
-| test_bm25_index.py | 7 | Build, search, save/load, tokenizer |
-| test_rrf.py | 6 | Fusion logic, score calculation, edge cases |
-| test_retrieval_pipeline.py | 4 | Full pipeline, empty store, context assembly |
-| **Total** | **17** | **65/65 pass** (bao gồm Phase 1+2 tests) |
+Các cải tiến có thể bổ sung trong tương lai:
+- Thêm cross-encoder reranker để cải thiện thứ hạng
+- Áp dụng MMR để tăng tính đa dạng kết quả
+- Deduplicate chunks từ cùng document
+- Cải thiện tokenizer BM25 cho tiếng Việt
+- Filter Builder nâng cao theo title và section

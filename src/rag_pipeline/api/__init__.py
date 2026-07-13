@@ -1,1 +1,1 @@
-"""API layer — FastAPI backend for RAG pipeline."""
+"""RAG API package."""

@@ -2,134 +2,118 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 @dataclass(slots=True)
 class ChunkingConfig:
-    max_tokens_per_chunk: int = 300
-    chunk_overlap_tokens: int = 40
-    min_chunk_tokens: int = 40
-    chunking_strategy: str = "recursive"
+    """Configuration for document chunking."""
+
+    max_tokens: int = 300
+    chunk_overlap: int = 40
+    min_tokens: int = 20
 
 
 @dataclass(slots=True)
-class EmbeddingConfig:
+class DenseEmbeddingConfig:
+    """Configuration for dense embedding via OpenRouter."""
+
     model_name: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
     timeout_seconds: float = 30.0
-    sub_batch_size: int = 500
     max_retries: int = 3
-    parallel_workers: int = 4
+    batch_size: int = 32
+
+
+@dataclass(slots=True)
+class SparseEmbeddingConfig:
+    """Configuration for classic BM25 sparse embedding."""
+
+    model_name: str = "classic_bm25"
+    k: float = 1.5
+    b: float = 0.75
+    avg_len: float = 256.0
+    vocab_path: str = "data/bm25_vocab.json"
+    batch_size: int = 256
 
 
 @dataclass(slots=True)
 class QdrantConfig:
+    """Configuration for Qdrant vector database."""
+
     url: str = field(default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333"))
-    collection_name: str = "wikipedia_vi_chunks"
+    collection_name: str = "rag_chunks_v2"
     dense_vector_name: str = "dense"
     sparse_vector_name: str = "bm25"
+    dense_top_k: int = 25
+    sparse_top_k: int = 25
+    on_disk: bool = True
+    # Set to "idf" when using raw term frequencies (e.g. FastEmbed BM25).
+    # Set to None when vectors already contain BM25 weights.
+    sparse_modifier: str | None = None
 
 
 @dataclass(slots=True)
-class LLMConfig:
+class LLMQueryConfig:
+    """Configuration for LLM-based query preprocessing."""
+
     model_name: str = "deepseek/deepseek-v4-flash"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
     timeout_seconds: float = 30.0
     max_retries: int = 3
-    temperature: float = 0.1
-    max_tokens: int = 512
+    prompt_version: str = "v1"
+    cache_ttl_days: int = 30
+    fallback_to_normalized: bool = True
 
 
 @dataclass(slots=True)
-class QueryConfig:
-    llm: LLMConfig = field(default_factory=LLMConfig)
-    enable_rewrite: bool = True
-    enable_guardrails: bool = True
-    max_query_length: int = 500
+class ContextBuilderConfig:
+    """Configuration for building context from retrieval results."""
 
-
-@dataclass(slots=True)
-class RetrievalConfig:
-    # Dense search
-    dense_top_k: int = 50
-    # BM25 search
-    bm25_top_k: int = 50
-    bm25_index_path: Path = Path("index/bm25.pkl")
-    bm25_tokenizer: str = "underthesea"  # "underthesea", "pyvi", or "simple"
-    # RRF fusion
-    rrf_k: int = 60
-    rrf_top_k: int = 20
-    # Re-ranking
-    enable_rerank: bool = True
-    rerank_provider: str = "cohere"  # "cohere" or "bge"
-    rerank_model: str = "rerank-v3.5"
-    api_key_env: str = "COHERE_API_KEY"
-    rerank_top_k: int = 5
-    # Score thresholds
-    min_score: float = 0.0
+    max_chunks: int = 5
+    include_title: bool = True
+    citation_format: str = "[{id}]"
 
 
 @dataclass(slots=True)
 class GenerationConfig:
-    """Configuration for Phase 4 answer generation."""
-    max_answer_tokens: int = 1024
-    temperature: float = 0.1
-    prompt_template: str = "vietnamese_rag"
-    max_context_tokens: int = 16_000  # LLM context window budget
+    """Configuration for LLM answer generation."""
+
+    model_name: str = "openai/gpt-4o-mini"
+    api_base: str = "https://openrouter.ai/api/v1"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    max_tokens: int = 1024
+    temperature: float = 0.3
+    timeout_seconds: float = 60.0
+    max_retries: int = 3
 
 
 @dataclass(slots=True)
-class OutputGuardrailsConfig:
-    """Configuration for output guardrails (hallucination, safety, quality)."""
-    enable_hallucination_check: bool = True
-    enable_safety_check: bool = True
-    enable_quality_check: bool = True
-    min_answer_confidence: float = 0.3
-    min_citations: int = 1
-    max_answer_length: int = 2000
+class StorageConfig:
+    """Configuration for the relational storage backend."""
+
+    db_path: str = "data/rag_storage.db"
 
 
 @dataclass(slots=True)
-class LangSmithConfig:
-    """Configuration for LangSmith tracing."""
-    enabled: bool = False
-    api_key_env: str = "LANGSMITH_API_KEY"
-    project: str = "rag-pipeline"
-    endpoint: str = "https://apac.api.smith.langchain.com"
+class RetrievalConfig:
+    """Top-level configuration for retrieval."""
 
-
-@dataclass(slots=True)
-class EvalConfig:
-    """Configuration for RAGAS evaluation."""
-    eval_dataset_path: Path = Path("documents/eval.csv")
-    llm_model: str = "deepseek/deepseek-v4-flash"
-    llm_api_base: str = "https://openrouter.ai/api/v1"
-    llm_api_key_env: str = "OPENROUTER_API_KEY"
-    faithfulness_threshold: float = 0.8
-    answer_relevance_threshold: float = 0.7
-    context_precision_threshold: float = 0.7
-    context_recall_threshold: float = 0.6
-
-
-@dataclass(slots=True)
-class IngestConfig:
-    source_type: str = "local_jsonl"
-    jsonl_path: Path = Path("documents/train.jsonl")
-    jsonl_sample_percent: float = 100.0
-    hf_dataset_name: str = "undertheseanlp/UVW-2026"
-    hf_dataset_split: str = "train"
-    hf_sample_percent: float = 1.0
-    hf_min_quality_score: int | None = None
-    corpus_path: Path = Path("document/corpus.csv")
-    train_queries_path: Path = Path("document/train.csv")
-    train_split_queries_path: Path = Path("document/train_split.csv")
-    validation_queries_path: Path = Path("document/val_split.csv")
-    public_test_queries_path: Path = Path("document/public_test.csv")
-    language: str = "vi"
-    jurisdiction: str = "VN"
-    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
-    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
+    dense: DenseEmbeddingConfig = field(default_factory=DenseEmbeddingConfig)
+    sparse: SparseEmbeddingConfig = field(default_factory=SparseEmbeddingConfig)
+    llm_query: LLMQueryConfig = field(default_factory=LLMQueryConfig)
+    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    rrf_k: int = 60
+    rrf_top_k: int = 20
+
+
+@dataclass(slots=True)
+class RAGConfig:
+    """Top-level configuration for the full RAG pipeline."""
+
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    context_builder: ContextBuilderConfig = field(default_factory=ContextBuilderConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)

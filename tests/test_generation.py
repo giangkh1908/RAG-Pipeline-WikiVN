@@ -1,410 +1,206 @@
-"""Tests for Phase 4: Generation — prompt builder, answer generator, output guardrails."""
+"""Tests for generation components."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
+import os
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
+import httpx
 import pytest
 
-from rag_pipeline.config import GenerationConfig, OutputGuardrailsConfig
-from rag_pipeline.generation.answer_generator import AnswerGenerator
-from rag_pipeline.generation.output_guardrails import OutputGuardrails
-from rag_pipeline.generation.prompt_builder import PromptBuilder
-from rag_pipeline.indexing.llm_client import DeterministicTestLLM
-from rag_pipeline.models import AnswerResult, Citation, Passage, ProcessedQuery, RetrievalResult
-from rag_pipeline.pipelines.answer_pipeline import AnswerPipeline
-from rag_pipeline.pipelines.query_pipeline import QueryPipeline
-from rag_pipeline.pipelines.retrieval_pipeline import RetrievalPipeline
-from rag_pipeline.query.guardrails import QueryGuardrails
-from rag_pipeline.query.normalizer import QueryNormalizer
+from rag_pipeline.config import ContextBuilderConfig, GenerationConfig
+from rag_pipeline.generation import (
+    AnswerResult,
+    CitationContextBuilder,
+    LLMAnswerGenerator,
+    RAGPipeline,
+)
+from rag_pipeline.generation.context_builder import NoRelevantContextError
+from rag_pipeline.retrieval.models import RetrievalResult
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+class TestCitationContextBuilder:
+    def test_build_formats_chunks_with_citations(self) -> None:
+        results = [
+            RetrievalResult(
+                chunk_id=uuid4(),
+                content="Content one",
+                rrf_score=0.9,
+                rank=1,
+                metadata={"title": "Title One"},
+            ),
+            RetrievalResult(
+                chunk_id=uuid4(),
+                content="Content two",
+                rrf_score=0.8,
+                rank=2,
+                metadata={"title": "Title Two"},
+            ),
+        ]
+        builder = CitationContextBuilder(ContextBuilderConfig(max_chunks=5))
+        built = builder.build(results)
+
+        assert "[1] Tiêu đề: Title One" in built.context
+        assert "Content one" in built.context
+        assert "[2] Tiêu đề: Title Two" in built.context
+        assert len(built.citations) == 2
+        assert "[1]" in built.citations
+
+    def test_build_respects_max_chunks(self) -> None:
+        results = [
+            RetrievalResult(
+                chunk_id=uuid4(),
+                content=f"Content {i}",
+                rrf_score=1.0 - i * 0.1,
+                rank=i,
+                metadata={},
+            )
+            for i in range(10)
+        ]
+        builder = CitationContextBuilder(ContextBuilderConfig(max_chunks=3))
+        built = builder.build(results)
+
+        assert len(built.citations) == 3
+        assert "[3]" in built.citations
+        assert "[4]" not in built.citations
+
+    def test_build_raises_on_empty_results(self) -> None:
+        builder = CitationContextBuilder()
+        with pytest.raises(NoRelevantContextError):
+            builder.build([])
 
 
-def _make_processed_query(question: str = "Wikipedia là gì?") -> ProcessedQuery:
-    return ProcessedQuery(
-        qid="test-1",
-        original_query=question,
-        normalized_query=question.lower(),
-        rewrite_query=question,
-        bm25_query=question.lower(),
-        intent="definition",
-    )
+class TestLLMAnswerGenerator:
+    @patch("rag_pipeline.generation.answer_generator.httpx.Client")
+    def test_generate_returns_full_answer(self, mock_client_class: MagicMock) -> None:
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
+        mock_response = self._mock_stream_response(["Hello ", "world"])
+        mock_client = MagicMock()
+        mock_client.stream.return_value.__enter__ = MagicMock(return_value=mock_response)
+        mock_client.stream.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client_class.return_value = mock_client
+
+        generator = LLMAnswerGenerator(GenerationConfig())
+        answer = generator.generate("Q", "C")
+
+        assert answer.answer == "Hello world"
+        assert answer.model_name == GenerationConfig().model_name
+
+    @patch("rag_pipeline.generation.answer_generator.httpx.Client")
+    def test_generate_stream_yields_tokens(self, mock_client_class: MagicMock) -> None:
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
+        mock_response = self._mock_stream_response(["Nha ", "Trang"])
+        mock_client = MagicMock()
+        mock_client.stream.return_value.__enter__ = MagicMock(return_value=mock_response)
+        mock_client.stream.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client_class.return_value = mock_client
+
+        generator = LLMAnswerGenerator(GenerationConfig())
+        tokens = list(generator.generate_stream("Q", "C"))
+
+        assert tokens == ["Nha ", "Trang"]
+
+    @staticmethod
+    def _mock_stream_response(tokens: list[str]) -> MagicMock:
+        """Build a mock httpx Response that yields SSE chunks."""
+        lines = []
+        for token in tokens:
+            payload = json.dumps({"choices": [{"delta": {"content": token}}]})
+            lines.append(f"data: {payload}")
+        lines.append("data: [DONE]")
+
+        response = MagicMock(spec=httpx.Response)
+        response.iter_lines.return_value = lines
+        response.raise_for_status.return_value = None
+        return response
 
 
-def _make_passages() -> list[Passage]:
-    return [
-        Passage(
-            chunk_id="chunk-001",
-            doc_id="doc-001",
-            title="Wikipedia",
-            text="Wikipedia là bách khoa toàn thư mở, được viết bởi các tình nguyện viên trên toàn thế giới.",
-            source_url="https://vi.wikipedia.org/wiki/Wikipedia",
-            dense_score=0.85,
-            bm25_score=3.2,
-            rrf_score=0.031,
-            rerank_score=0.92,
+class TestRAGPipeline:
+    def test_answer_stream_emits_progress_and_done(self) -> None:
+        result = RetrievalResult(
+            chunk_id=uuid4(),
+            content="Chunk content",
+            rrf_score=0.9,
             rank=1,
-        ),
-        Passage(
-            chunk_id="chunk-002",
-            doc_id="doc-002",
-            title="Bách khoa toàn thư",
-            text="Bách khoa toàn thư là loại sách tham khảo chứa đựng kiến thức về nhiều lĩnh vực.",
-            source_url="https://vi.wikipedia.org/wiki/Bách_khoa_toàn_thư",
-            dense_score=0.72,
-            bm25_score=2.1,
-            rrf_score=0.025,
-            rerank_score=0.78,
-            rank=2,
-        ),
-    ]
-
-
-def _make_retrieval_result(
-    question: str = "Wikipedia là gì?",
-    passages: list[Passage] | None = None,
-) -> RetrievalResult:
-    if passages is None:
-        passages = _make_passages()
-    query = _make_processed_query(question)
-    context = "\n\n".join(f"[{p.rank}] ({p.title}) {p.text}" for p in passages)
-    return RetrievalResult(query=query, passages=passages, context=context)
-
-
-def _build_test_pipeline() -> AnswerPipeline:
-    """Build a full test pipeline with deterministic components."""
-    gen_config = GenerationConfig()
-    output_config = OutputGuardrailsConfig()
-    llm = DeterministicTestLLM(response_mode="generation")
-
-    prompt_builder = PromptBuilder(gen_config)
-    answer_generator = AnswerGenerator(
-        llm_client=llm,
-        prompt_builder=prompt_builder,
-        config=gen_config,
-    )
-    output_guardrails = OutputGuardrails(output_config)
-
-    # Query pipeline with test components
-    query_pipeline = QueryPipeline(
-        config=__import__("rag_pipeline.config", fromlist=["QueryConfig"]).QueryConfig(),
-        normalizer=QueryNormalizer(),
-        guardrails=QueryGuardrails(),
-        rewriter=None,
-    )
-
-    # Retrieval pipeline is not needed for unit tests — we mock retrieval_result
-    return AnswerPipeline(
-        query_pipeline=query_pipeline,
-        retrieval_pipeline=None,  # type: ignore[arg-type]
-        answer_generator=answer_generator,
-        output_guardrails=output_guardrails,
-    )
-
-
-# ---------------------------------------------------------------------------
-# PromptBuilder tests
-# ---------------------------------------------------------------------------
-
-
-class TestPromptBuilder:
-    def test_build_returns_two_messages(self) -> None:
-        config = GenerationConfig()
-        builder = PromptBuilder(config)
-        result = _make_retrieval_result()
-        messages = builder.build(result)
-        assert len(messages) == 2
-        assert messages[0]["role"] == "system"
-        assert messages[1]["role"] == "user"
-
-    def test_system_message_contains_instructions(self) -> None:
-        config = GenerationConfig()
-        builder = PromptBuilder(config)
-        result = _make_retrieval_result()
-        messages = builder.build(result)
-        system_content = messages[0]["content"]
-        assert "JSON" in system_content
-        assert "citations" in system_content
-        assert "tiếng Việt" in system_content
-
-    def test_user_message_contains_passages(self) -> None:
-        config = GenerationConfig()
-        builder = PromptBuilder(config)
-        result = _make_retrieval_result()
-        messages = builder.build(result)
-        user_content = messages[1]["content"]
-        assert "[1]" in user_content
-        assert "[2]" in user_content
-        assert "Wikipedia" in user_content
-
-    def test_user_message_contains_question(self) -> None:
-        config = GenerationConfig()
-        builder = PromptBuilder(config)
-        result = _make_retrieval_result("Ai sáng lập Wikipedia?")
-        messages = builder.build(result)
-        user_content = messages[1]["content"]
-        assert "Ai sáng lập Wikipedia?" in user_content
-
-    def test_empty_passages(self) -> None:
-        config = GenerationConfig()
-        builder = PromptBuilder(config)
-        result = _make_retrieval_result(passages=[])
-        messages = builder.build(result)
-        user_content = messages[1]["content"]
-        assert "Không tìm thấy" in user_content
-
-
-# ---------------------------------------------------------------------------
-# AnswerGenerator tests
-# ---------------------------------------------------------------------------
-
-
-class TestAnswerGenerator:
-    def test_generate_basic(self) -> None:
-        gen_config = GenerationConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(llm, builder, gen_config)
-
-        result = _make_retrieval_result()
-        answer = generator.generate(result)
-
-        assert isinstance(answer, AnswerResult)
-        assert answer.question == "Wikipedia là gì?"
-        assert len(answer.answer) > 0
-
-    def test_generate_has_citations(self) -> None:
-        gen_config = GenerationConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(llm, builder, gen_config)
-
-        result = _make_retrieval_result()
-        answer = generator.generate(result)
-
-        assert len(answer.citations) >= 1
-        assert answer.citations[0].chunk_id == "chunk-001"
-        assert answer.citations[0].title == "Wikipedia"
-
-    def test_generate_confidence(self) -> None:
-        gen_config = GenerationConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(llm, builder, gen_config)
-
-        result = _make_retrieval_result()
-        answer = generator.generate(result)
-
-        assert 0.0 <= answer.confidence <= 1.0
-        assert answer.confidence == 0.8  # DeterministicTestLLM returns 0.8
-
-    def test_generate_passages_used(self) -> None:
-        gen_config = GenerationConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(llm, builder, gen_config)
-
-        result = _make_retrieval_result()
-        answer = generator.generate(result)
-
-        assert answer.passages_used == 2
-
-    def test_generate_fallback_on_bad_json(self) -> None:
-        """When chat_json fails, fallback to chat() text mode."""
-        gen_config = GenerationConfig()
-
-        class BadJsonLLM:
-            def chat(self, messages, **kwargs):
-                return "Fallback text answer"
-
-            def chat_json(self, messages, **kwargs):
-                raise ValueError("Invalid JSON")
-
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(BadJsonLLM(), builder, gen_config)  # type: ignore[arg-type]
-
-        result = _make_retrieval_result()
-        answer = generator.generate(result)
-
-        assert answer.answer == "Fallback text answer"
-        assert answer.citations == []
-        assert answer.metadata["parse_mode"] == "fallback_text"
-
-
-# ---------------------------------------------------------------------------
-# OutputGuardrails tests
-# ---------------------------------------------------------------------------
-
-
-class TestOutputGuardrails:
-    def test_safe_answer_passes(self) -> None:
-        config = OutputGuardrailsConfig()
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Wikipedia là gì?",
-            answer="Wikipedia là bách khoa toàn thư mở.",
-            citations=[Citation(claim="test", chunk_id="c1", doc_id="d1", title="t")],
-            confidence=0.8,
-            passages_used=1,
-        )
-        result = _make_retrieval_result()
-
-        checked = guardrails.check(answer, result)
-        assert checked.metadata["guardrail_checked"] is True
-        assert "unsafe_content_detected" not in checked.metadata.get("guardrail_flags", [])
-
-    def test_hallucination_no_context(self) -> None:
-        config = OutputGuardrailsConfig()
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Test?",
-            answer="Some answer without context",
-            citations=[],
-            confidence=0.5,
-            passages_used=0,
-        )
-        result = _make_retrieval_result(passages=[])
-
-        checked = guardrails.check(answer, result)
-        assert "hallucination_no_context" in checked.metadata["guardrail_flags"]
-
-    def test_safety_unsafe_content(self) -> None:
-        config = OutputGuardrailsConfig()
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Test?",
-            answer="Nội dung có bom và vu_khí ở đây",
-            citations=[Citation(claim="test", chunk_id="c1", doc_id="d1", title="t")],
-            confidence=0.5,
-            passages_used=1,
-        )
-        result = _make_retrieval_result()
-
-        checked = guardrails.check(answer, result)
-        assert "unsafe_content_detected" in checked.metadata["guardrail_flags"]
-
-    def test_quality_too_short(self) -> None:
-        config = OutputGuardrailsConfig()
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Test?",
-            answer="Short",
-            citations=[Citation(claim="test", chunk_id="c1", doc_id="d1", title="t")],
-            confidence=0.5,
-            passages_used=1,
-        )
-        result = _make_retrieval_result()
-
-        checked = guardrails.check(answer, result)
-        assert "answer_too_short" in checked.metadata["guardrail_flags"]
-
-    def test_quality_insufficient_citations(self) -> None:
-        config = OutputGuardrailsConfig(min_citations=2)
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Test?",
-            answer="This is a longer answer that should not trigger the too-short flag.",
-            citations=[Citation(claim="test", chunk_id="c1", doc_id="d1", title="t")],
-            confidence=0.5,
-            passages_used=1,
-        )
-        result = _make_retrieval_result()
-
-        checked = guardrails.check(answer, result)
-        assert "insufficient_citations" in checked.metadata["guardrail_flags"]
-
-    def test_confidence_reduced_on_flags(self) -> None:
-        config = OutputGuardrailsConfig()
-        guardrails = OutputGuardrails(config)
-
-        answer = AnswerResult(
-            question="Test?",
-            answer="Short",
-            citations=[],
-            confidence=0.8,
-            passages_used=0,
-        )
-        result = _make_retrieval_result(passages=[])
-
-        checked = guardrails.check(answer, result)
-        assert checked.confidence < 0.8  # Confidence should be reduced
-
-
-# ---------------------------------------------------------------------------
-# AnswerPipeline end-to-end tests
-# ---------------------------------------------------------------------------
-
-
-class TestAnswerPipeline:
-    def test_e2e_with_test_llm(self) -> None:
-        """Full pipeline with deterministic test LLM — no API calls."""
-        from rag_pipeline.indexing.embedder import DeterministicTestEmbedder
-        from rag_pipeline.indexing.vector_store import InMemoryVectorStore
-
-        gen_config = GenerationConfig()
-        output_config = OutputGuardrailsConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-
-        query_pipeline = QueryPipeline(
-            config=__import__("rag_pipeline.config", fromlist=["QueryConfig"]).QueryConfig(),
-            normalizer=QueryNormalizer(),
-            guardrails=QueryGuardrails(),
-            rewriter=None,
+            metadata={"title": "Topic"},
         )
 
-        # Build a minimal retrieval pipeline with in-memory store
-        vector_store = InMemoryVectorStore()
-        embedder = DeterministicTestEmbedder()
+        retrieval_pipeline = MagicMock()
+        processed = MagicMock()
+        processed.rewritten_query = "rewritten"
+        processed.normalized_query = "query"
+        processed.intent = "factual"
+        retrieval_pipeline.preprocess.return_value = processed
+        retrieval_pipeline.search_processed.return_value = [result]
 
-        from rag_pipeline.config import RetrievalConfig
-        from rag_pipeline.indexing.bm25_index import BM25Index
+        context_builder = CitationContextBuilder()
+        answer_generator = MagicMock()
+        answer_generator.generate_stream.return_value = iter(["Answer ", "text"])
 
-        retrieval_pipeline = RetrievalPipeline(
-            config=RetrievalConfig(enable_rerank=False),
-            embedder=embedder,
-            vector_store=vector_store,
-            bm25_index=BM25Index(index_path=Path("index/bm25_test.pkl")),
+        pipeline = RAGPipeline(retrieval_pipeline, context_builder, answer_generator)
+        events = list(pipeline.answer_stream("query"))
+
+        progress_events = [e for e in events if e.type == "progress"]
+        token_events = [e for e in events if e.type == "token"]
+        done_events = [e for e in events if e.type == "done"]
+
+        assert len(progress_events) == 4  # rewrite, retrieval, context, generation
+        assert len(token_events) == 2
+        assert len(done_events) == 1
+
+        done = done_events[0].data
+        assert isinstance(done, AnswerResult)
+        assert done.answer == "Answer text"
+        assert done.intent == "factual"
+        assert len(done.sources) == 0  # answer has no citations
+
+    def test_answer_stream_returns_error_when_no_results(self) -> None:
+        retrieval_pipeline = MagicMock()
+        processed = MagicMock()
+        processed.rewritten_query = "rewritten"
+        processed.normalized_query = "query"
+        processed.intent = "factual"
+        retrieval_pipeline.preprocess.return_value = processed
+        retrieval_pipeline.search_processed.return_value = []
+
+        pipeline = RAGPipeline(
+            retrieval_pipeline,
+            CitationContextBuilder(),
+            MagicMock(),
+        )
+        events = list(pipeline.answer_stream("query"))
+
+        error_events = [e for e in events if e.type == "error"]
+        assert len(error_events) == 1
+        assert "Không đủ thông tin" in error_events[0].message
+
+    def test_answer_sync_returns_result(self) -> None:
+        result = RetrievalResult(
+            chunk_id=uuid4(),
+            content="Chunk content",
+            rrf_score=0.9,
+            rank=1,
+            metadata={"title": "Topic"},
         )
 
-        prompt_builder = PromptBuilder(gen_config)
-        answer_generator = AnswerGenerator(llm, prompt_builder, gen_config)
-        output_guardrails = OutputGuardrails(output_config)
+        retrieval_pipeline = MagicMock()
+        processed = MagicMock()
+        processed.rewritten_query = "rewritten"
+        processed.normalized_query = "query"
+        processed.intent = "factual"
+        retrieval_pipeline.preprocess.return_value = processed
+        retrieval_pipeline.search_processed.return_value = [result]
 
-        pipeline = AnswerPipeline(
-            query_pipeline=query_pipeline,
-            retrieval_pipeline=retrieval_pipeline,
-            answer_generator=answer_generator,
-            output_guardrails=output_guardrails,
+        answer_generator = MagicMock()
+        answer_generator.generate_stream.return_value = iter(["Final ", "answer"])
+
+        pipeline = RAGPipeline(
+            retrieval_pipeline,
+            CitationContextBuilder(),
+            answer_generator,
         )
+        answer_result = pipeline.answer("query")
 
-        result = pipeline.ask("Wikipedia là gì?")
-
-        assert isinstance(result, AnswerResult)
-        assert result.question == "Wikipedia là gì?"
-        assert len(result.answer) > 0
-        assert result.metadata.get("guardrail_checked") is True
-
-    def test_citation_mapping(self) -> None:
-        """Citations map correctly to source passages."""
-        gen_config = GenerationConfig()
-        llm = DeterministicTestLLM(response_mode="generation")
-        builder = PromptBuilder(gen_config)
-        generator = AnswerGenerator(llm, builder, gen_config)
-
-        retrieval_result = _make_retrieval_result()
-        answer = generator.generate(retrieval_result)
-
-        # DeterministicTestLLM returns source_index=1
-        assert answer.citations[0].chunk_id == "chunk-001"
-        assert answer.citations[0].doc_id == "doc-001"
-        assert answer.citations[0].title == "Wikipedia"
-        assert answer.citations[0].source_url == "https://vi.wikipedia.org/wiki/Wikipedia"
+        assert answer_result.answer == "Final answer"

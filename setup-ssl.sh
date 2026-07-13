@@ -5,33 +5,16 @@
 set -e
 
 DOMAIN="wikivn.top"
+REPO_RAW="https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main"
 
 echo "=== Setting up Nginx + SSL for $DOMAIN ==="
 
 # Install Nginx + Certbot
 apt update
-apt install -y nginx certbot python3-certbot-nginx
+apt install -y nginx certbot python3-certbot-nginx curl
 
-# Create Nginx config
-cat > /etc/nginx/sites-available/rag << EOF
-server {
-    listen 80;
-    server_name $DOMAIN www.$DOMAIN;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        # SSE streaming
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 300s;
-    }
-}
-EOF
+# Download the latest nginx config from the repo
+wget -q -O /etc/nginx/sites-available/rag "${REPO_RAW}/nginx.conf"
 
 # Enable site
 ln -sf /etc/nginx/sites-available/rag /etc/nginx/sites-enabled/
@@ -44,10 +27,13 @@ nginx -t
 systemctl restart nginx
 
 # Get SSL certificate
-certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN
+certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN"
 
-# Auto-renew SSL
-echo "0 0,12 * * * root certbot renew --quiet" >> /etc/crontab
+# Auto-renew SSL (avoid duplicate cron entries)
+CRON_LINE="0 0,12 * * * root certbot renew --quiet"
+if ! grep -qF "$CRON_LINE" /etc/crontab; then
+    echo "$CRON_LINE" >> /etc/crontab
+fi
 
 echo "=== Setup complete! ==="
 echo "Your site is now available at: https://$DOMAIN"

@@ -1,13 +1,18 @@
+# Multi-stage Dockerfile: build frontend then run Python backend + serve static files.
+
 # ============================================
-# Stage 1: Build frontend (cached separately)
+# Stage 1: Build frontend
 # ============================================
-FROM node:22-alpine AS frontend-builder
+FROM node:22-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
 # Cache npm install layer
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --ignore-scripts
+RUN npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm ci --ignore-scripts
 
 # Only rebuild when source changes
 COPY frontend/ .
@@ -20,15 +25,15 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Install system deps (rarely changes)
+# Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user (rarely changes)
+# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
 
-# Install Python deps (cached layer - only changes when pyproject.toml changes)
+# Install Python deps matching pyproject.toml
 COPY pyproject.toml .
 RUN pip install --no-cache-dir --no-compile \
     "python-dotenv>=1.0.0" \
@@ -36,12 +41,20 @@ RUN pip install --no-cache-dir --no-compile \
     "uvicorn[standard]>=0.34.0" \
     "httpx>=0.27.0" \
     "qdrant-client>=1.13.0,<1.14.0" \
-    "langsmith>=0.9.0"
+    "pydantic>=2.0.0"
 
-# Copy source code (changes most often)
+# Copy source code
 COPY src/ src/
 
-# Copy frontend build (from cached stage)
+# Copy scripts and raw dataset for deployment initialization
+COPY scripts/ scripts/
+COPY documents/ documents/
+
+# Copy indexed data (SQLite + BM25 vocab)
+COPY data/rag_storage.db data/
+COPY data/bm25_vocab.json data/
+
+# Copy frontend build from the previous stage
 COPY --from=frontend-builder /app/frontend/dist frontend/dist
 
 # Set ownership

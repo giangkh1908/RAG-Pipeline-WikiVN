@@ -1,21 +1,21 @@
-export interface Citation {
-  doc_id: string;
+export interface Source {
+  citation: string;
   title: string;
-  url: string;
-  score: number;
-}
-
-export interface ChatHistoryEntry {
-  role: 'user' | 'assistant';
   content: string;
+  chunk_id: string;
 }
 
 export interface ChatResponse {
   answer: string;
-  citations: Citation[];
-  confidence: number;
-  passages_used: number;
+  sources: Source[];
+  intent: string;
   latency_ms: number;
+}
+
+export interface StreamProgress {
+  type: 'progress';
+  step: string;
+  message: string;
 }
 
 export interface StreamToken {
@@ -25,8 +25,9 @@ export interface StreamToken {
 
 export interface StreamDone {
   type: 'done';
-  citations: Citation[];
-  confidence: number;
+  answer: string;
+  sources: Source[];
+  intent: string;
 }
 
 export interface StreamError {
@@ -34,14 +35,15 @@ export interface StreamError {
   message: string;
 }
 
-export type StreamEvent = StreamToken | StreamDone | StreamError;
+export type StreamEvent = StreamProgress | StreamToken | StreamDone | StreamError;
 
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  citations?: Citation[];
-  confidence?: number;
+  sources?: Source[];
+  intent?: string;
   latency_ms?: number;
   isStreaming?: boolean;
+  progress?: string;
 }

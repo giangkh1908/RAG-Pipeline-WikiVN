@@ -1,246 +1,95 @@
-# RAG Pipeline v1 — Vietnamese Wikipedia
+# RAG Pipeline — Vietnam Tourism
 
-Hỏi đáp dựa trên 1.1 triệu bài viết Wikipedia tiếng Việt, sử dụng RAG (Retrieval-Augmented Generation).
-
-> **v1** — Gọi LLM trực tiếp, luồng đi duy nhất (query → retrieve → generate).\
-> **v2 (planned)** — Tool calling, MCP, Agent orchestration.
-
-🔗 **Demo:** https://wikivn.top
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Backend | FastAPI + Python 3.12 |
-| Frontend | React 19 + Vite 8 + Tailwind CSS v4 |
-| Vector Store | Qdrant (Docker) |
-| Embedding | OpenRouter (nvidia/llama-nemotron-embed-vl-1b-v2:free, 2048-dim) |
-| LLM | OpenRouter (deepseek/deepseek-v4-flash) |
-| Re-ranking | Cohere Rerank v3.5 |
-| BM25 | rank-bm25 + pyvi |
-| Tracing | LangSmith |
-| Evaluation | RAGAS |
-| Deploy | Docker + GitHub Actions CD |
-
-## Cấu trúc thư mục
-
-```
-RAG/
-├── src/rag_pipeline/       # Python backend
-│   ├── api/                # FastAPI server
-│   │   ├── app.py          # App + CORS + static serving
-│   │   ├── schemas.py      # Pydantic models
-│   │   └── routes/         # API endpoints
-│   ├── query/              # Query processing
-│   ├── retrieval/          # Hybrid search
-│   ├── generation/         # LLM answer generation
-│   └── eval/               # RAGAS evaluation
-├── frontend/               # React frontend
-│   ├── src/
-│   │   ├── api/client.ts   # SSE streaming client
-│   │   ├── hooks/useChat.ts
-│   │   └── components/     # UI components
-│   └── dist/               # Build output (auto-served by FastAPI)
-├── tests/                  # pytest tests
-├── docs/                   # Documentation
-├── Dockerfile              # Multi-stage build (Node + Python)
-├── docker-compose.yml      # Qdrant + API
-└── .github/workflows/      # GitHub Actions CD
-```
+Hệ thống Retrieval-Augmented Generation cho lĩnh vực du lịch Việt Nam. Dự án xây dựng pipeline từ dữ liệu thô đến trả lời tự động, sử dụng dense vector và sparse BM25 vector trong cùng một Qdrant collection.
 
 ---
 
-## Deployment
+## Dataset
 
-Production: **https://wikivn.top**
+Dữ liệu sử dụng trong dự án là [Vietnam Tourism v2](https://www.kaggle.com/datasets/vuonglsts/vietnam-tourism-v2/data) từ Kaggle. Đây là bộ dữ liệu Hỏi và Đáp tiếng Việt bao gồm nhiều chủ đề về văn hóa, lịch sử, địa điểm, ẩm thực và mẹo du lịch.
 
-### Kiến trúc
+Cách dự án sử dụng dataset:
 
-```
-User → Cloudflare (DNS + SSL) → Nginx → Docker (FastAPI + Qdrant)
-```
+- **Corpus:** Lấy `title` và `context` từ mỗi chủ đề, bỏ qua các cặp câu hỏi-câu trả lời trong `qas`.
+- **Evaluation:** Trích xuất `qas` thành tập câu hỏi đánh giá, mỗi chủ đề một câu hỏi đại diện.
 
-### Tech
-
-- **Docker**: Multi-stage build (Node frontend → Python runtime)
-- **CD**: GitHub Actions → GHCR → VPS auto-deploy
-- **Domain**: Cloudflare proxy + Let's Encrypt SSL
-- **Reverse proxy**: Nginx (SSE streaming support)
-
-**Auto deploy**: Push lên `main` → GitHub Actions tự build + deploy.
-
-📖 **Chi tiết**: [docs/deploy.md](docs/deploy.md)
+Chi tiết xem tại `docs/dataset.md`.
 
 ---
 
-## Development
+## Kiến trúc
 
-### Bước 1: Clone & setup Python
+Hệ thống được xây dựng theo các tầng rõ ràng:
 
-```bash
-git clone <repo-url>
-cd RAG-Pipeline-WikiVN
-
-# Tạo virtual environment
-python -m venv .venv
-
-# Activate
-# Windows:
-.venv\Scripts\activate
-# Linux/Mac:
-source .venv/bin/activate
-
-# Cài dependencies
-pip install -e ".[indexing,monitoring,eval,api]"
+```text
+Source → Document → Chunk → Index
 ```
 
-### Bước 2: Environment variables
+### Các thành phần chính
 
-Tạo file `.env` trong thư mục gốc:
+- **Storage Layer:** Quản lý `Source`, `Document`, `Chunk`, `IndexEntry` với UUID.
+- **Chunking Pipeline:** Xử lý document qua các giai đoạn Normalize → Clean → Enrich → Section Detect → Chunk → Validate.
+- **Embedding:** Tạo dense vector qua OpenRouter và sparse BM25 vector bằng classic BM25 offline.
+- **Vector Store:** Lưu trữ và tìm kiếm vector trong Qdrant với cả dense và sparse vectors.
+- **Retrieval:** Kết hợp dense search, sparse search, RRF fusion và query preprocessing bằng LLM để trả về kết quả cuối cùng.
+- **Generation:** Tạo câu trả lời tiếng Việt có trích dẫn từ các đoạn văn bản đã truy xuất, hỗ trợ streaming.
 
-```env
-# Bắt buộc
-OPENROUTER_API_KEY=<your-key>
+---
 
-# Qdrant (mặc định: localhost:6333)
-QDRANT_URL=http://localhost:6333
+## Tài liệu
 
-# Tùy chọn: Cohere re-ranking
-COHERE_API_KEY=<your-key>
+- `docs/dataset.md` — Mô tả dataset Vietnam Tourism v2.
+- `docs/storage.md` — Kiến trúc tầng lưu trữ.
+- `docs/chunking.md` — Chi tiết chunking pipeline.
+- `docs/retrieval.md` — Kiến trúc retrieval với hybrid search và query preprocessing.
+- `docs/generation.md` — Tạo câu trả lời có trích dẫn và streaming.
+- `docs/latency.md` — Kết quả benchmark latency từng đoạn pipeline.
 
-# Tùy chọn: LangSmith tracing
-LANGSMITH_TRACING_V2=true
-LANGSMITH_API_KEY=<your-key>
-LANGSMITH_PROJECT=rag-pipeline
-LANGSMITH_ENDPOINT=https://apac.api.smith.langchain.com
-```
+---
 
-### Bước 3: Start Qdrant
+## Scripts
 
-```bash
-docker-compose up -d qdrant
-```
+- `scripts/ingest_and_index.py` — Ingest dữ liệu và index vào Qdrant.
+- `scripts/demo_rag.py` — Chạy demo RAG tương tác với streaming.
+- `scripts/benchmark_latency.py` — Đo latency từng đoạn của pipeline và xuất báo cáo JSON/CSV.
 
-### Bước 4: Ingest dữ liệu
+---
 
-```bash
-# Test với sample nhỏ (nhanh, ~1 phút)
-python -m rag_pipeline.main ingest --sample 0.001
+## Chạy API và Frontend
 
-# Full dataset (1.1M docs, mất vài giờ)
-python -m rag_pipeline.main ingest
-```
-
-### Bước 5: Chạy ứng dụng
+### Backend API
 
 ```bash
-# Build frontend
-cd frontend && npm install && npm run build && cd ..
-
-# Start API (tự serve frontend)
+$env:PYTHONIOENCODING="utf-8"
 python -m rag_pipeline.api.app
-# → http://localhost:8000
 ```
 
----
+API chạy tại `http://localhost:8000`, hỗ trợ:
+- `GET /api/health` — kiểm tra trạng thái.
+- `POST /api/chat` — trả lời không streaming.
+- `POST /api/chat/stream` — streaming câu trả lời qua SSE.
+- Swagger UI tại `/docs`.
 
-## Frontend
-
-Chat UI responsive, hoạt động trên mobile và desktop.
-
-**Features:**
-- SSE streaming token-by-token
-- Auto-expanding textarea
-- Gợi ý câu hỏi (click để gửi)
-- Citations hiển thị nguồn Wikipedia
-- Responsive: mobile horizontal scroll, desktop wrap
-
----
-
-## API Endpoints
-
-| Method | Path | Mô tả |
-|--------|------|-------|
-| `GET` | `/api/health` | Kiểm tra trạng thái |
-| `POST` | `/api/chat` | Hỏi đáp (JSON response) |
-| `GET` | `/api/chat/stream?question=...` | Hỏi đáp (SSE streaming) |
-| `POST` | `/api/eval` | Chạy đánh giá RAGAS |
-| `GET` | `/docs` | Swagger UI |
-
-### Ví dụ gọi API
+### Frontend Development
 
 ```bash
-# Non-streaming
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Python là gì?"}'
-
-# SSE streaming (mặc định skip_rewrite=true, ~6-8s)
-curl -N "http://localhost:8000/api/chat/stream?question=Python+la+gi"
-
-# Full pipeline với query rewrite (~12-16s)
-curl -N "http://localhost:8000/api/chat/stream?question=Python+la+gi&skip_rewrite=false"
+cd frontend
+npm install
+npm run dev    # → http://localhost:5173
 ```
 
-### Streaming Modes
+Frontend tự động proxy `/api` về backend `http://localhost:8000`.
 
-| Mode | Flag | TTFT | Khi nào dùng |
-|------|------|------|---------------|
-| Fast (default) | `skip_rewrite=true` | ~6-8s | Câu hỏi đơn giản |
-| Full | `skip_rewrite=false` | ~12-16s | Câu phức tạp, cần query rewrite |
-
----
-
-## CLI Commands
+### Docker Production
 
 ```bash
-# Hỏi đáp (text output)
-python -m rag_pipeline.main ask --question "Wikipedia là gì?" --text
-
-# Hỏi đáp (streaming)
-python -m rag_pipeline.main ask --question "Wikipedia là gì?" --text --stream
-
-# Search documents
-python -m rag_pipeline.main search --query "lịch sử Việt Nam"
-
-# Đánh giá
-python -m rag_pipeline.main eval --limit 10
+docker compose up -d
 ```
 
----
-
-## Tests
-
-```bash
-# Chạy tất cả tests
-python -m pytest tests/ -v
-
-# Chỉ chạy API tests
-python -m pytest tests/test_api.py -v
-
-# Bỏ qua eval tests (chậm)
-python -m pytest tests/ -v -k "not eval"
-```
+Image `api` build frontend và serve qua FastAPI trên port `8000`.
 
 ---
 
-## Documentation
+## Mục tiêu
 
-| File | Nội dung |
-|------|----------|
-| [PLAN.md](PLAN.md) | Kế hoạch dự án & tiến độ |
-| [docs/deploy.md](docs/deploy.md) | Deployment guide (Docker, VPS, SSL) |
-| [docs/memory.md](docs/memory.md) | Conversation memory (multi-turn chat) |
-| [docs/api.md](docs/api.md) | API reference |
-| [docs/frontend.md](docs/frontend.md) | Frontend architecture |
-| [docs/generation.md](docs/generation.md) | Generation pipeline |
-| [docs/retrieval.md](docs/retrieval.md) | Retrieval pipeline (hybrid search + re-ranking) |
-| [docs/query_processing.md](docs/query_processing.md) | Query processing (normalize + rewrite) |
-| [docs/ingest_pipeline.md](docs/ingest_pipeline.md) | Ingest pipeline (Wikipedia → Qdrant) |
-| [docs/eval.md](docs/eval.md) | Evaluation metrics (RAGAS) |
-
----
-
-## License
-
-MIT
+Xây dựng một RAG pipeline sạch, modular, dễ thay thế từng thành phần, và có khả năng đánh giá chất lượng retrieval trên dataset tiếng Việt.
