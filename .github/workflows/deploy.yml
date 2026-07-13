@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build Image
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
 
 env:
   IMAGE_NAME: ghcr.io/giangkh1908/rag-pipeline-wikivn
-  DOMAIN: wikivn.top
 
 jobs:
   build:
@@ -40,101 +39,3 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-
-    steps:
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            mkdir -p /opt/rag
-            cd /opt/rag
-
-            # Always download the latest compose file from the repo
-            wget -q -O docker-compose.yml https://raw.githubusercontent.com/giangkh1908/RAG-Pipeline-WikiVN/main/docker-compose.yml
-
-            # Create .env if it does not exist
-            if [ ! -f .env ]; then
-              echo "OPENROUTER_API_KEY=your-key-here" > .env
-              echo "QDRANT_URL=http://qdrant:6333" >> .env
-              echo "COHERE_API_KEY=your-key-here" >> .env
-              echo "Please edit /opt/rag/.env with your API keys"
-            fi
-
-            # Login GHCR
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            # Pull the latest image
-            docker pull ${{ env.IMAGE_NAME }}:latest
-
-            # Restart services: bring Qdrant up first so we can inspect it independently.
-            docker compose down
-            docker compose up -d qdrant
-
-            # Wait for Qdrant to become healthy
-            echo "Waiting for Qdrant to become healthy..."
-            qdrant_healthy=0
-            for i in $(seq 1 60); do
-              if docker compose ps qdrant | grep -q healthy; then
-                echo "Qdrant is healthy"
-                qdrant_healthy=1
-                break
-              fi
-              if [ $((i % 6)) -eq 0 ]; then
-                echo "  ...Qdrant still starting ($((i * 5))s elapsed)"
-              fi
-              sleep 5
-            done
-
-            if [ "$qdrant_healthy" -ne 1 ]; then
-              echo "ERROR: Qdrant did not become healthy within 5 minutes"
-              echo "--- Qdrant status ---"
-              docker compose ps qdrant
-              echo "--- Qdrant logs ---"
-              docker logs rag-qdrant --tail 100
-              docker compose down
-              exit 1
-            fi
-
-            # Start indexer and api now that Qdrant is ready
-            docker compose up -d
-
-            # Cleanup old images
-            docker image prune -f
-
-            # Health check (indexer may take several minutes on first deploy)
-            echo "Waiting for API to be healthy..."
-            api_healthy=0
-            for i in $(seq 1 180); do
-              if curl -fsS http://localhost:8000/api/health > /dev/null 2>&1; then
-                echo "API is healthy"
-                api_healthy=1
-                break
-              fi
-              if [ $((i % 12)) -eq 0 ]; then
-                echo "  ...still waiting ($((i * 5))s elapsed)"
-              fi
-              sleep 5
-            done
-
-            if [ "$api_healthy" -ne 1 ]; then
-              echo "ERROR: API did not become healthy within 15 minutes"
-              echo "--- Qdrant logs ---"
-              docker logs rag-qdrant --tail 50
-              echo "--- Indexer logs ---"
-              docker logs rag-indexer --tail 100
-              echo "--- API logs ---"
-              docker logs rag-api --tail 100
-              exit 1
-            fi
-
-            echo "Deployed! https://${{ env.DOMAIN }}"
