@@ -12,12 +12,6 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz >/dev/null 2>&1 || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
 
   # ============================================
   # One-time indexer: populates Qdrant on first deploy
@@ -33,9 +27,9 @@ services:
     volumes:
       - rag_data:/app/data
     depends_on:
-      qdrant:
-        condition: service_healthy
-    command: ["python", "scripts/init_deployment.py"]
+      - qdrant
+    command: >
+      sh -c "echo 'Waiting for Qdrant...'; until curl -fsS http://qdrant:6333/healthz >/dev/null 2>&1; do sleep 2; done; echo 'Qdrant ready'; python scripts/init_deployment.py"
     restart: "no"
 
   # ============================================
@@ -57,7 +51,7 @@ services:
       - rag_data:/app/data
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
       indexer:
         condition: service_completed_successfully
     restart: unless-stopped
