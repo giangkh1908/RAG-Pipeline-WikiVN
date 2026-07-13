@@ -88,6 +88,8 @@ docker compose up -d
 
 Image `api` build frontend và serve qua FastAPI trên port `8000`.
 
+Chi tiết deploy lên VPS với GitHub Actions xem tại `docs/deploy.md`.
+
 ---
 
 ## Mục tiêu
