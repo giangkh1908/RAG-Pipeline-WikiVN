@@ -55,3 +55,7 @@ docker-compose.override.yml
 
 # chunk
 chunk/
+
+# opencode
+.opencode/
+docs/superpowers/
