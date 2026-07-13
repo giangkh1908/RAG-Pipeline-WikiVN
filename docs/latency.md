@@ -142,20 +142,8 @@ Latency dao động lớn chủ yếu do:
 - Một số câu generation dài hơn
 - Cache lạnh/lạnh không đều
 
-### So sánh với Wiki RAG 2M chunks
-
-Hệ thống trước đây với **~2 triệu chunks** từ Wikipedia tiếng Việt bị chậm
-kinh khủng vì:
-
-| Yếu tố | Wiki RAG 2M chunks | Tourism RAG 2.8k chunks |
-|--------|-------------------|------------------------|
-| Qdrant search | Chậm (index lớn) | Nhanh (~24ms) |
-| BM25 index | Có thể rất lớn | Nhỏ, tra cứu local |
-| Memory usage | Cao | Thấp |
-| Embedding build | Cực kỳ lâu | ~5 phút |
-
-Với tourism RAG, **bottleneck không còn là scale mà là API latency** từ
-OpenRouter.
+**Nhận xét:** Với corpus hiện tại, bottleneck chính là **API latency** từ
+OpenRouter (rewrite, embedding, generation), không phải vector search.
 
 ---
 
