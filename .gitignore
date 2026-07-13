@@ -36,6 +36,11 @@ data/bm25_vocab.json
 # Keep the raw tourism dataset in version control for CI builds
 !documents/vietnam_tourism_v2.json
 
+# Eval reports (generated)
+data/eval/report_*.json
+data/eval/report_*.csv
+data/eval/_raw_llm_response.txt
+
 # Logs
 *.log
 logs/

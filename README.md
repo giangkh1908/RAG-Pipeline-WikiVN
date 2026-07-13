@@ -44,6 +44,7 @@ Source → Document → Chunk → Index
 - `docs/retrieval.md` — Kiến trúc retrieval với hybrid search và query preprocessing.
 - `docs/generation.md` — Tạo câu trả lời có trích dẫn và streaming.
 - `docs/latency.md` — Kết quả benchmark latency từng đoạn pipeline.
+- `docs/eval.md` — Hướng dẫn chạy đánh giá RAG với LLM judge.
 
 ---
 
