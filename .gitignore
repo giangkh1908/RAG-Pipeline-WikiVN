@@ -28,10 +28,13 @@ index/
 *.pkl
 
 # Data files (large)
-documents/
+documents/*
 document/
 data/*.db
 data/bm25_vocab.json
+
+# Keep the raw tourism dataset in version control for CI builds
+!documents/vietnam_tourism_v2.json
 
 # Logs
 *.log

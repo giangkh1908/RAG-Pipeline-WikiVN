@@ -29,7 +29,9 @@ docs
 *.md
 LICENSE
 
-# Data: include SQLite DB and BM25 vocab in image, exclude eval/benchmarks
+# Data: generated at deploy time by the indexer service; keep build context small
+data/*.db
+data/bm25_vocab.json
 data/eval
 data/benchmarks
 *.csv

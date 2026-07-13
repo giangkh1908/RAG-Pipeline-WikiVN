@@ -46,13 +46,10 @@ RUN pip install --no-cache-dir --no-compile \
 # Copy source code
 COPY src/ src/
 
-# Copy scripts and raw dataset for deployment initialization
+# Copy scripts and raw dataset for deployment initialization.
+# The SQLite DB and BM25 vocab are generated on first deploy by the indexer.
 COPY scripts/ scripts/
-COPY documents/ documents/
-
-# Copy indexed data (SQLite + BM25 vocab)
-COPY data/rag_storage.db data/
-COPY data/bm25_vocab.json data/
+COPY documents/vietnam_tourism_v2.json documents/
 
 # Copy frontend build from the previous stage
 COPY --from=frontend-builder /app/frontend/dist frontend/dist
