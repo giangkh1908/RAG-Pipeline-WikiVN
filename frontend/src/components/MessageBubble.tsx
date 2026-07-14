@@ -1,5 +1,4 @@
 import type { Message } from '../types';
-import { CitationCard } from './CitationCard';
 
 interface Props {
   message: Message;
@@ -38,20 +37,9 @@ export function MessageBubble({ message }: Props) {
               <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]"></span>
             </span>
           )}
-          {message.isStreaming && message.content.length > 0 && (
-            <span className="ml-0.5 inline-block h-4 w-0.5 bg-gray-500 animate-pulse"></span>
-          )}
         </div>
-
-        {/* Sources */}
-        {!message.isStreaming && message.sources && message.sources.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {message.sources.map((source, i) => (
-              <CitationCard key={i} source={source} index={i + 1} />
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
 }
+

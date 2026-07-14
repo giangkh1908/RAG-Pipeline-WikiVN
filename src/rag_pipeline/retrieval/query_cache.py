@@ -27,11 +27,15 @@ class QueryCache:
     query text so that changes to either invalidate previous entries.
     """
 
-    def __init__(self, db_path: str | Path = "data/rag_storage.db") -> None:
-        self._db_path = str(db_path)
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+    def __init__(self, storage: "SQLiteStorage") -> None:
+        """Cache rewritten queries and intents in SQLite.
+
+        The cache key is derived from the model name, prompt version, and raw
+        query text so that changes to either invalidate previous entries.
+        """
+        self._storage = storage
+        self._connection = storage._connection  # type: ignore[attr-defined]
+        self._lock = storage._lock  # type: ignore[attr-defined]
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
@@ -48,7 +52,8 @@ class QueryCache:
         CREATE INDEX IF NOT EXISTS idx_query_cache_created_at
             ON query_cache(created_at);
         """
-        self._connection.executescript(ddl)
+        with self._lock:
+            self._connection.executescript(ddl)
 
     def close(self) -> None:
         self._connection.close()
@@ -68,10 +73,11 @@ class QueryCache:
     ) -> CachedQuery | None:
         """Return a cached result if it exists and is not expired."""
         cache_key = self.make_key(model_name, prompt_version, raw_query)
-        row = self._connection.execute(
-            "SELECT * FROM query_cache WHERE cache_key = ?",
-            (cache_key,),
-        ).fetchone()
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM query_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
 
         if row is None:
             return None
@@ -92,41 +98,44 @@ class QueryCache:
     def set(self, cached: CachedQuery) -> None:
         """Persist a query preprocessing result."""
         cache_key = self.make_key(cached.model_name, cached.prompt_version, cached.raw_query)
-        self._connection.execute(
-            """
-            INSERT INTO query_cache
-                (cache_key, raw_query, rewritten_query, intent, model_name,
-                 prompt_version, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(cache_key) DO UPDATE SET
-                raw_query=excluded.raw_query,
-                rewritten_query=excluded.rewritten_query,
-                intent=excluded.intent,
-                model_name=excluded.model_name,
-                prompt_version=excluded.prompt_version,
-                created_at=excluded.created_at
-            """,
-            (
-                cache_key,
-                cached.raw_query,
-                cached.rewritten_query,
-                cached.intent,
-                cached.model_name,
-                cached.prompt_version,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
+        with self._lock:
+            self._connection.execute(
+                """
+                INSERT INTO query_cache
+                    (cache_key, raw_query, rewritten_query, intent, model_name,
+                     prompt_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    raw_query=excluded.raw_query,
+                    rewritten_query=excluded.rewritten_query,
+                    intent=excluded.intent,
+                    model_name=excluded.model_name,
+                    prompt_version=excluded.prompt_version,
+                    created_at=excluded.created_at
+                """,
+                (
+                    cache_key,
+                    cached.raw_query,
+                    cached.rewritten_query,
+                    cached.intent,
+                    cached.model_name,
+                    cached.prompt_version,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
 
     def clear_expired(self, ttl_days: int = 30) -> int:
         """Remove expired entries. Returns number deleted."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat()
-        cursor = self._connection.execute(
-            "DELETE FROM query_cache WHERE created_at < ?",
-            (cutoff,),
-        )
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM query_cache WHERE created_at < ?",
+                (cutoff,),
+            )
         return cursor.rowcount
 
     def clear_all(self) -> int:
         """Remove all cached entries. Returns number deleted."""
-        cursor = self._connection.execute("DELETE FROM query_cache")
+        with self._lock:
+            cursor = self._connection.execute("DELETE FROM query_cache")
         return cursor.rowcount

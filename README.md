@@ -1,98 +1,131 @@
-# RAG Pipeline — Vietnam Tourism
+# 🇻🇳 Vietnam Tourism RAG Pipeline
 
-Hệ thống Retrieval-Augmented Generation cho lĩnh vực du lịch Việt Nam. Dự án xây dựng pipeline từ dữ liệu thô đến trả lời tự động, sử dụng dense vector và sparse BM25 vector trong cùng một Qdrant collection.
+Một hệ thống **Retrieval-Augmented Generation (RAG)** tiên tiến, được thiết kế chuyên biệt cho lĩnh vực du lịch Việt Nam. Dự án kết hợp sức mạnh của tìm kiếm Hybrid (Dense + Sparse), xử lý truy vấn bằng LLM và quản lý bộ nhớ hội thoại thông minh để cung cấp trải nghiệm trả lời tự động chính xác và tự nhiên.
 
----
-
-## Dataset
-
-Dữ liệu sử dụng trong dự án là [Vietnam Tourism v2](https://www.kaggle.com/datasets/vuonglsts/vietnam-tourism-v2/data) từ Kaggle. Đây là bộ dữ liệu Hỏi và Đáp tiếng Việt bao gồm nhiều chủ đề về văn hóa, lịch sử, địa điểm, ẩm thực và mẹo du lịch.
-
-Cách dự án sử dụng dataset:
-
-- **Corpus:** Lấy `title` và `context` từ mỗi chủ đề, bỏ qua các cặp câu hỏi-câu trả lời trong `qas`.
-- **Evaluation:** Trích xuất `qas` thành tập câu hỏi đánh giá, mỗi chủ đề một câu hỏi đại diện.
-
-Chi tiết xem tại `docs/dataset.md`.
+![Architecture Overview](https://via.placeholder.com/800x400?text=RAG+Architecture+Flow:+Query+→+LLM+Rewrite+→+Hybrid+Retrieval+→+Context+Builder+→+LLM+Generation)
 
 ---
 
-## Kiến trúc
+## 🚀 Tính Năng Nổi Bật
 
-Hệ thống được xây dựng theo các tầng rõ ràng:
+### 🔍 Hybrid Retrieval Engine
+Kết hợp hai phương pháp tìm kiếm mạnh mẽ nhất hiện nay trong cùng một Qdrant collection:
+- **Dense Retrieval**: Sử dụng vector embeddings để bắt trọn ý nghĩa ngữ nghĩa (semantic meaning).
+- **Sparse Retrieval**: Sử dụng BM25 để tìm kiếm chính xác từ khóa (keyword matching), cực kỳ hiệu quả với các tên địa danh, đặc sản Việt Nam.
+- **RRF Fusion**: Sử dụng thuật toán *Reciprocal Rank Fusion* để hợp nhất kết quả từ cả hai phương pháp, đảm bảo độ chính xác tối đa.
 
-```text
-Source → Document → Chunk → Index
+### 🧠 Thông Minh Hóa Truy Vấn (Query Processing)
+Không chỉ tìm kiếm đơn thuần, hệ thống sử dụng LLM để:
+- **Query Rewriting**: Viết lại câu hỏi của người dùng để tối ưu cho việc tìm kiếm (ví dụ: biến "chỗ đó" thành "Vịnh Hạ Long" dựa trên ngữ cảnh).
+- **Intent Detection**: Phân tích ý định người dùng để điều chỉnh chiến lược retrieval.
+
+### 💾 Quản Lý Bộ Nhớ Hội Thoại (Stateful Memory)
+Hỗ trợ ghi nhớ ngữ cảnh phiên làm việc thông qua `session_id`:
+- **Conversation Store**: Lưu trữ toàn bộ lịch sử trò chuyện trong SQLite.
+- **Memory Compaction**: Khi lịch sử quá dài, hệ thống tự động tóm tắt (summarize) các lượt hội thoại cũ bằng LLM, giúp giảm chi phí token mà vẫn giữ được mạch câu chuyện.
+- **Automatic GC**: Tự động dọn dẹp các session không hoạt động sau 24 giờ.
+
+### ⚡ Trải Nghiệm Thời Gian Thực
+- **Streaming Response**: Hỗ trợ stream token qua SSE (Server-Sent Events), mang lại cảm giác phản hồi tức thì như ChatGPT.
+- **Citation System**: Trích dẫn nguồn rõ ràng từ tập dữ liệu, giúp người dùng dễ dàng đối chiếu thông tin.
+
+---
+
+## 🛠 Kiến Trúc Hệ Thống
+
+Hệ thống được xây dựng theo mô hình phân tầng modular:
+
+```mermaid
+graph TD
+    User((User)) --> API[FastAPI Backend]
+    API --> QP[LLM Query Processor]
+    QP --> HR[Hybrid Retriever]
+    HR --> VS[(Qdrant Vector Store)]
+    HR --> DB[(SQLite Storage)]
+    HR --> CB[Citation Context Builder]
+    CB --> AG[LLM Answer Generator]
+    AG --> Mem[Conversation Memory]
+    Mem --> DB
+    AG --> User
 ```
 
-### Các thành phần chính
-
-- **Storage Layer:** Quản lý `Source`, `Document`, `Chunk`, `IndexEntry` với UUID.
-- **Chunking Pipeline:** Xử lý document qua các giai đoạn Normalize → Clean → Enrich → Section Detect → Chunk → Validate.
-- **Embedding:** Tạo dense vector qua OpenRouter và sparse BM25 vector bằng classic BM25 offline.
-- **Vector Store:** Lưu trữ và tìm kiếm vector trong Qdrant với cả dense và sparse vectors.
-- **Retrieval:** Kết hợp dense search, sparse search, RRF fusion và query preprocessing bằng LLM để trả về kết quả cuối cùng.
-- **Generation:** Tạo câu trả lời tiếng Việt có trích dẫn từ các đoạn văn bản đã truy xuất, hỗ trợ streaming.
+**Luồng dữ liệu chính:**
+`User Query` $\rightarrow$ `Rewrite/Intent` $\rightarrow$ `Hybrid Search` $\rightarrow$ `Context Construction` $\rightarrow$ `LLM Generation` $\rightarrow$ `Streaming Output`
 
 ---
 
-## Tài liệu
+## 📦 Cài Đặt & Chạy Thử
 
-- `docs/dataset.md` — Mô tả dataset Vietnam Tourism v2.
-- `docs/storage.md` — Kiến trúc tầng lưu trữ.
-- `docs/chunking.md` — Chi tiết chunking pipeline.
-- `docs/retrieval.md` — Kiến trúc retrieval với hybrid search và query preprocessing.
-- `docs/generation.md` — Tạo câu trả lời có trích dẫn và streaming.
-- `docs/latency.md` — Kết quả benchmark latency từng đoạn pipeline.
-- `docs/eval.md` — Hướng dẫn chạy đánh giá RAG với LLM judge.
+### Yêu cầu hệ thống
+- Python 3.10+
+- Node.js 18+
+- Qdrant (Docker)
 
----
+### 1. Thiết lập Backend
+```bash
+# Tạo môi trường ảo và cài đặt dependencies
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# .\.venv\Scripts\activate  # Windows
 
-## Scripts
+pip install -r pyproject.toml # hoặc pip install .
+```
 
-- `scripts/ingest_and_index.py` — Ingest dữ liệu và index vào Qdrant.
-- `scripts/demo_rag.py` — Chạy demo RAG tương tác với streaming.
-- `scripts/benchmark_latency.py` — Đo latency từng đoạn của pipeline và xuất báo cáo JSON/CSV.
-
----
-
-## Chạy API và Frontend
-
-### Backend API
-
+**Khởi chạy API:**
 ```bash
 $env:PYTHONIOENCODING="utf-8"
 python -m rag_pipeline.api.app
 ```
+API sẽ chạy tại: `http://localhost:8000` (Swagger UI: `/docs`)
 
-API chạy tại `http://localhost:8000`, hỗ trợ:
-- `GET /api/health` — kiểm tra trạng thái.
-- `POST /api/chat` — trả lời không streaming.
-- `POST /api/chat/stream` — streaming câu trả lời qua SSE.
-- Swagger UI tại `/docs`.
-
-### Frontend Development
-
+### 2. Thiết lập Frontend
 ```bash
 cd frontend
 npm install
-npm run dev    # → http://localhost:5173
+npm run dev
 ```
+Frontend sẽ chạy tại: `http://localhost:5173`
 
-Frontend tự động proxy `/api` về backend `http://localhost:8000`.
-
-### Docker Production
-
+### 3. Chạy nhanh với Docker (Production mode)
 ```bash
 docker compose up -d
 ```
 
-Image `api` build frontend và serve qua FastAPI trên port `8000`.
+---
 
-Chi tiết deploy lên VPS với GitHub Actions xem tại `docs/deploy.md`.
+## 📂 Cấu Trúc Dự Án
+
+```text
+├── data/                  # SQLite database & local storage
+├── docs/                  # Tài liệu chi tiết (Dataset, Storage, Retrieval, ...)
+├── frontend/              # React application (Vite + Tailwind)
+├── scripts/               # Công cụ hỗ trợ (Ingest, Benchmark, Demo)
+└── src/
+    └── rag_pipeline/
+        ├── api/           # FastAPI endpoints & dependencies
+        ├── generation/     # LLM Generation & Memory management
+        ├── retrieval/      # Hybrid search & Query preprocessing
+        └── storage/        # SQLite persistence layer
+```
 
 ---
 
-## Mục tiêu
+## 📊 Tài Liệu Chi Tiết
 
-Xây dựng một RAG pipeline sạch, modular, dễ thay thế từng thành phần, và có khả năng đánh giá chất lượng retrieval trên dataset tiếng Việt.
+Vui lòng tham khảo thư mục `docs/` để biết thêm chi tiết về:
+- [Dataset](docs/dataset.md): Mô tả bộ dữ liệu Vietnam Tourism v2.
+- [Storage](docs/storage.md): Kiến trúc lưu trữ phân tầng.
+- [Retrieval](docs/retrieval.md): Chi tiết về Hybrid Search và RRF.
+- [Generation](docs/generation.md): Cơ chế tạo câu trả lời và trích dẫn.
+- [Memory](docs/memory.md): Quản lý phiên hội thoại và nén bộ nhớ.
+- [Evaluation](docs/eval.md): Cách đánh giá chất lượng RAG với LLM Judge.
+
+---
+
+## 🎯 Mục Tiêu Phát Triển
+- [x] Xây dựng Pipeline Hybrid Search (Dense + Sparse).
+- [x] Tích hợp Memory Compaction cho hội thoại dài.
+- [x] Triển khai Streaming SSE cho Frontend.
+- [ ] Hỗ trợ đa dạng hơn các nguồn dữ liệu (PDF, Web Scraping).
+- [ ] Tối ưu hóa latency thông qua caching nâng cao.
+- [ ] Phát triển hệ thống đánh giá tự động (Auto-Eval) sâu hơn.

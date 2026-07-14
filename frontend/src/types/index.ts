@@ -10,6 +10,9 @@ export interface ChatResponse {
   sources: Source[];
   intent: string;
   latency_ms: number;
+  session_id: string | null;
+  turn_no: number | null;
+  memory_used: boolean;
 }
 
 export interface StreamProgress {
@@ -28,6 +31,9 @@ export interface StreamDone {
   answer: string;
   sources: Source[];
   intent: string;
+  session_id: string | null;
+  turn_no: number | null;
+  memory_used: boolean;
 }
 
 export interface StreamError {
@@ -44,6 +50,7 @@ export interface Message {
   sources?: Source[];
   intent?: string;
   latency_ms?: number;
+  turn_no?: number;
   isStreaming?: boolean;
   progress?: string;
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -31,6 +32,14 @@ class SQLiteStorage:
             isolation_level=None,  # autocommit mode
         )
         self._connection.row_factory = sqlite3.Row
+        # Serialise access from multiple threads (async loop + executor).
+        # Use RLock so methods that call _exec (which locks) don't deadlock
+        # when they're themselves called from within a locked context.
+        self._lock = threading.RLock()
+        # Wait up to 10s for a lock instead of failing immediately.
+        self._exec("PRAGMA busy_timeout=10000")
+        if self._db_path != ":memory:":
+            self._exec("PRAGMA journal_mode=WAL")
         self._ensure_schema()
 
     # ------------------------------------------------------------------
@@ -78,12 +87,46 @@ class SQLiteStorage:
             metadata TEXT NOT NULL DEFAULT '{}',
             FOREIGN KEY (chunk_id) REFERENCES chunks(id)
         );
+
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            session_id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            last_active_at TEXT NOT NULL,
+            token_total INTEGER NOT NULL DEFAULT 0,
+            compacting INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_active
+            ON chat_sessions(last_active_at);
+
+        CREATE TABLE IF NOT EXISTS chat_turns (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            turn_no INTEGER NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT,
+            intent TEXT,
+            tokens_hint INTEGER NOT NULL DEFAULT 0,
+            summary TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(session_id, turn_no),
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_turns_session_turn
+            ON chat_turns(session_id, turn_no);
         """
-        self._connection.executescript(ddl)
+        with self._lock:
+            self._connection.executescript(ddl)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        """Execute SQL under the thread lock (serialises concurrent access)."""
+        with self._lock:
+            return self._connection.execute(sql, params)
+
     @staticmethod
     def _dump_json(value: Any) -> str:
         return json.dumps(value, default=str, ensure_ascii=False)
@@ -98,7 +141,7 @@ class SQLiteStorage:
     # Source operations
     # ------------------------------------------------------------------
     def save_source(self, source: Source) -> Source:
-        self._connection.execute(
+        self._exec(
             """
             INSERT INTO sources (id, tenant_id, type, version, metadata)
             VALUES (?, ?, ?, ?, ?)
@@ -119,7 +162,7 @@ class SQLiteStorage:
         return source
 
     def get_source(self, source_id: UUID) -> Source | None:
-        row = self._connection.execute(
+        row = self._exec(
             "SELECT * FROM sources WHERE id = ?", (str(source_id),)
         ).fetchone()
         if row is None:
@@ -134,12 +177,12 @@ class SQLiteStorage:
 
     def list_sources(self, tenant_id: str | None = None) -> list[Source]:
         if tenant_id is not None:
-            rows = self._connection.execute(
+            rows = self._exec(
                 "SELECT * FROM sources WHERE tenant_id = ? ORDER BY id",
                 (tenant_id,),
             ).fetchall()
         else:
-            rows = self._connection.execute("SELECT * FROM sources ORDER BY id").fetchall()
+            rows = self._exec("SELECT * FROM sources ORDER BY id").fetchall()
         return [
             Source(
                 id=UUID(row["id"]),
@@ -155,7 +198,7 @@ class SQLiteStorage:
     # Document operations
     # ------------------------------------------------------------------
     def save_document(self, document: Document) -> Document:
-        self._connection.execute(
+        self._exec(
             """
             INSERT INTO documents (id, source_id, checksum, status, metadata)
             VALUES (?, ?, ?, ?, ?)
@@ -176,7 +219,7 @@ class SQLiteStorage:
         return document
 
     def get_document(self, document_id: UUID) -> Document | None:
-        row = self._connection.execute(
+        row = self._exec(
             "SELECT * FROM documents WHERE id = ?", (str(document_id),)
         ).fetchone()
         if row is None:
@@ -205,7 +248,7 @@ class SQLiteStorage:
             params.append(status)
 
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-        rows = self._connection.execute(
+        rows = self._exec(
             f"SELECT * FROM documents {where_clause} ORDER BY id", params
         ).fetchall()
 
@@ -224,7 +267,7 @@ class SQLiteStorage:
     # Chunk operations
     # ------------------------------------------------------------------
     def save_chunk(self, chunk: Chunk) -> Chunk:
-        self._connection.execute(
+        self._exec(
             """
             INSERT INTO chunks (id, document_id, chunk_order, content, token_count, metadata)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -247,7 +290,7 @@ class SQLiteStorage:
         return chunk
 
     def get_chunk(self, chunk_id: UUID) -> Chunk | None:
-        row = self._connection.execute(
+        row = self._exec(
             "SELECT * FROM chunks WHERE id = ?", (str(chunk_id),)
         ).fetchone()
         if row is None:
@@ -262,7 +305,7 @@ class SQLiteStorage:
         )
 
     def list_chunks(self, document_id: UUID) -> list[Chunk]:
-        rows = self._connection.execute(
+        rows = self._exec(
             "SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_order",
             (str(document_id),),
         ).fetchall()
@@ -282,7 +325,7 @@ class SQLiteStorage:
     # Index operations
     # ------------------------------------------------------------------
     def save_index_entry(self, entry: IndexEntry) -> IndexEntry:
-        self._connection.execute(
+        self._exec(
             """
             INSERT INTO index_entries (chunk_id, dense_vector, sparse_vector, metadata)
             VALUES (?, ?, ?, ?)
@@ -301,7 +344,7 @@ class SQLiteStorage:
         return entry
 
     def get_index_entry(self, chunk_id: UUID) -> IndexEntry | None:
-        row = self._connection.execute(
+        row = self._exec(
             "SELECT * FROM index_entries WHERE chunk_id = ?", (str(chunk_id),)
         ).fetchone()
         if row is None:
@@ -310,12 +353,12 @@ class SQLiteStorage:
 
     def list_index_entries(self, chunk_ids: list[UUID] | None = None) -> list[IndexEntry]:
         if chunk_ids is None:
-            rows = self._connection.execute(
+            rows = self._exec(
                 "SELECT * FROM index_entries ORDER BY chunk_id"
             ).fetchall()
         else:
             placeholders = ",".join("?" for _ in chunk_ids)
-            rows = self._connection.execute(
+            rows = self._exec(
                 f"SELECT * FROM index_entries WHERE chunk_id IN ({placeholders})",
                 [str(cid) for cid in chunk_ids],
             ).fetchall()

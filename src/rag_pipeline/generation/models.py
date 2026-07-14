@@ -33,6 +33,9 @@ class AnswerResult:
     context: str
     sources: list[dict[str, Any]] = field(default_factory=list)
     intent: str | None = None
+    session_id: str | None = None
+    turn_no: int | None = None
+    memory_used: bool = False
 
 
 @dataclass

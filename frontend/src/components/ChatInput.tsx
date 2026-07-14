@@ -3,16 +3,20 @@ import { useState, useRef, useEffect } from 'react';
 interface Props {
   onSend: (message: string) => void;
   disabled: boolean;
+  suggestions?: string[];
 }
 
-const SUGGESTIONS = [
+const MAX_CHARS = 500;
+const WARN_THRESHOLD = MAX_CHARS - 50;
+
+const DEFAULT_SUGGESTIONS = [
   'Vịnh Hạ Long nằm ở đâu?',
   'Du lịch Hội An nên đi mùa nào?',
   'Có món ăn đặc sản nào ở Đà Nẵng?',
   'Nha Trang có bãi biển nổi tiếng nào?',
 ];
 
-export function ChatInput({ onSend, disabled }: Props) {
+export function ChatInput({ onSend, disabled, suggestions = [] }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -38,13 +42,16 @@ export function ChatInput({ onSend, disabled }: Props) {
     }
   };
 
+  const remaining = MAX_CHARS - value.length;
+  const showCounter = value.length > WARN_THRESHOLD;
+
   return (
     <div className="border-t border-gray-100 bg-white pb-3 pt-2 sm:pb-4 sm:pt-2">
       {/* Suggestions — horizontal scroll on mobile */}
       {value === '' && !disabled && (
         <div className="mx-auto max-w-3xl px-3 pb-2.5 sm:px-4 sm:pb-3">
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:flex-wrap sm:justify-center">
-            {SUGGESTIONS.map((s, i) => (
+            {(suggestions.length > 0 ? suggestions : DEFAULT_SUGGESTIONS).map((s, i) => (
               <button
                 key={i}
                 onClick={() => onSend(s)}
@@ -65,11 +72,12 @@ export function ChatInput({ onSend, disabled }: Props) {
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={e => setValue(e.target.value)}
+            onChange={e => setValue(e.target.value.slice(0, MAX_CHARS))}
             onKeyDown={handleKeyDown}
             placeholder="Hỏi bất cứ điều gì..."
             disabled={disabled}
             rows={1}
+            maxLength={MAX_CHARS}
             className="flex-1 resize-none border-0 bg-transparent p-0 text-sm leading-relaxed
                        placeholder:text-gray-400 focus:outline-none focus:ring-0
                        disabled:text-gray-400 min-h-[24px] max-h-[160px]"
@@ -95,9 +103,14 @@ export function ChatInput({ onSend, disabled }: Props) {
           </button>
         </div>
 
-        <p className="mt-1.5 text-center text-[11px] text-gray-400 sm:mt-2">
-          Hỏi đáp về du lịch Việt Nam
-        </p>
+        <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-400 sm:mt-2">
+          <span className="flex-1 text-center">Hỏi đáp về du lịch Việt Nam</span>
+          {showCounter && (
+            <span className={remaining < 20 ? 'text-red-500' : ''}>
+              {remaining}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

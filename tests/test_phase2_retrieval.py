@@ -198,7 +198,7 @@ class TestRetrievalPipeline:
         )
         pipeline.search("Nha Trang", top_k=2)
 
-        llm_processor.process.assert_called_once_with("Nha Trang")
+        llm_processor.process.assert_called_once_with("Nha Trang", None)
         retriever.retrieve.assert_called_once()
         assert retriever.retrieve.call_args.args[0] == "du lịch nha trang"
         assert retriever.retrieve.call_args.kwargs["top_k"] == 2

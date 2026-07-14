@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput';
 import { MessageBubble } from './components/MessageBubble';
 
 export default function App() {
-  const { messages, isStreaming, sendMessage, clearMessages } = useChat();
+  const { messages, isStreaming, suggestions, sendMessage, resetSession } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function App() {
         </h1>
         {messages.length > 0 && (
           <button
-            onClick={clearMessages}
+            onClick={resetSession}
             className="rounded-lg px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600
                        hover:bg-gray-50 transition-colors sm:px-3"
           >
@@ -60,7 +60,7 @@ export default function App() {
       </main>
 
       {/* Input */}
-      <ChatInput onSend={sendMessage} disabled={isStreaming} />
+      <ChatInput onSend={sendMessage} disabled={isStreaming} suggestions={suggestions} />
     </div>
   );
 }

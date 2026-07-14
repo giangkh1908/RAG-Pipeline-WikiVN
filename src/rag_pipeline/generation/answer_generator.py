@@ -18,12 +18,11 @@ class LLMAnswerGenerator:
     """Generate answers using an LLM via OpenRouter."""
 
     _SYSTEM_PROMPT = (
-        "Bạn là trợ lý du lịch Việt Nam. Hãy trả lờ i câu hỏi dựa vào ngữ cảnh được cung cấp.\n\n"
+        "Bạn là trợ lý du lịch Việt Nam. Hãy trả lời câu hỏi dựa vào ngữ cảnh được cung cấp.\n\n"
         "Yêu cầu:\n"
-        "- Trả lờ i bằng tiếng Việt, ngắn gọn, rõ ràng\n"
+        "- Trả lời bằng tiếng Việt, ngắn gọn, rõ ràng\n"
         "- Chỉ dựa vào thông tin trong ngữ cảnh\n"
-        '- Nếu không đủ thông tin, hãy nói "Tôi không có đủ thông tin để trả lờ i"\n'
-        "- Trích dẫn nguồn bằng các số trong ngoặc vuông [1], [2], ..."
+        '- Nếu không đủ thông tin, hãy nói "Tôi không có đủ thông tin để trả lời"'
     )
 
     def __init__(self, config: GenerationConfig | None = None) -> None:
@@ -66,6 +65,24 @@ Câu hỏi: {query}"""
 
         Yields individual content tokens as they arrive from the model.
         """
+        messages = [
+            {"role": "system", "content": self._SYSTEM_PROMPT},
+            {"role": "user", "content": self._user_prompt(query, context)},
+        ]
+        yield from self.generate_stream_messages(messages)
+
+    def generate_stream_messages(self, messages: list[dict[str, str]]) -> Iterator[str]:
+        """Stream answer tokens using a pre-built message list.
+
+        ``messages`` follows the OpenAI Chat Completions format:
+        ``[{"role": ..., "content": ...}, ...]``. The list is sent as-is
+        (apart from a server-side system prompt prefix), which is how
+        the chat-memory layer plugs in earlier turns and summaries.
+        """
+        # Always ensure a system message at the top.
+        if not messages or messages[0].get("role") != "system":
+            messages = [{"role": "system", "content": self._SYSTEM_PROMPT}, *messages]
+
         last_exception: Exception | None = None
         for attempt in range(self.config.max_retries):
             try:
@@ -74,13 +91,7 @@ Câu hỏi: {query}"""
                     "/chat/completions",
                     json={
                         "model": self.config.model_name,
-                        "messages": [
-                            {"role": "system", "content": self._SYSTEM_PROMPT},
-                            {
-                                "role": "user",
-                                "content": self._user_prompt(query, context),
-                            },
-                        ],
+                        "messages": messages,
                         "max_tokens": self.config.max_tokens,
                         "temperature": self.config.temperature,
                         "stream": True,
@@ -120,3 +131,49 @@ Câu hỏi: {query}"""
 
     def close(self) -> None:
         self._client.close()
+
+    def generate_suggestions(
+        self, question: str, answer: str, max_suggestions: int = 4
+    ) -> list[str]:
+        """Generate follow-up question suggestions based on the last Q&A pair.
+
+        Returns a list of 1-``max_suggestions`` suggestion strings. On
+        failure, returns an empty list so the caller can fall back to
+        defaults.
+        """
+        prompt = (
+            f"Câu hỏi vừa rồi: {question}\n"
+            f"Câu trả lời: {answer}\n\n"
+            f"Dựa vào đó, gợi ý {max_suggestions} câu hỏi tiếp theo mà người dùng "
+            f"có thể quan tâm. Mỗi câu trên 1 dòng, không đánh số, không giải thích."
+        )
+        try:
+            response = self._client.post(
+                "/chat/completions",
+                json={
+                    "model": self.config.model_name,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Bạn là trợ lý gợi ý câu hỏi cho chat du lịch Việt Nam. "
+                                "Chỉ trả về các câu hỏi, mỗi câu trên 1 dòng."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 128,
+                    "temperature": 0.5,
+                },
+            )
+            response.raise_for_status()
+            data: dict[str, Any] = response.json()
+            content = data["choices"][0]["message"]["content"]
+            lines = [
+                ln.strip().lstrip("0123456789.-) ").strip()
+                for ln in content.strip().splitlines()
+                if ln.strip()
+            ]
+            return lines[:max_suggestions]
+        except Exception:
+            return []

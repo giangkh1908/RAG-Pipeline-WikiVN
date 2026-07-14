@@ -83,10 +83,35 @@ class GenerationConfig:
     model_name: str = "openai/gpt-4o-mini"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
-    max_tokens: int = 1024
+    max_tokens: int = 800
     temperature: float = 0.3
     timeout_seconds: float = 60.0
     max_retries: int = 3
+
+
+@dataclass(slots=True)
+class MemoryConfig:
+    """Configuration for chat memory (session-based, no auth).
+
+    The compact threshold is computed at runtime from
+    ``keep_raw_turns * (max_input_tokens + max_output_tokens) * 0.7``
+    so that adjusting input/output limits rescales the threshold
+    automatically.
+    """
+
+    enabled: bool = True
+    keep_raw_turns: int = 3
+    summary_max_tokens: int = 256
+    summary_temperature: float = 0.2
+    summary_model_name: str = "openai/gpt-4o-mini"
+    summary_api_base: str = "https://openrouter.ai/api/v1"
+    summary_api_key_env: str = "OPENROUTER_API_KEY"
+    summary_max_retries: int = 3
+    summary_timeout_seconds: float = 60.0
+    session_ttl_hours: int = 24
+    max_input_chars: int = 500
+    max_output_tokens: int = 800
+    char_per_token: int = 3  # heuristic divisor for Vietnamese
 
 
 @dataclass(slots=True)
@@ -117,3 +142,4 @@ class RAGConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     context_builder: ContextBuilderConfig = field(default_factory=ContextBuilderConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)

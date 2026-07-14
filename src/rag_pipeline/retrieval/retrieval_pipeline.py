@@ -25,9 +25,15 @@ class RetrievalPipeline:
         self.filter_builder = filter_builder
         self.retriever = retriever
 
-    def preprocess(self, query: str) -> ProcessedQuery:
-        """Preprocess a raw query."""
-        return self.llm_processor.process(query)
+    def preprocess(
+        self, query: str, conversation_context: str | None = None
+    ) -> ProcessedQuery:
+        """Preprocess a raw query.
+
+        When ``conversation_context`` is provided, the LLM rewriter uses
+        it to resolve references like "5 cái trên", "chỗ đó", etc.
+        """
+        return self.llm_processor.process(query, conversation_context)
 
     def search_processed(
         self,

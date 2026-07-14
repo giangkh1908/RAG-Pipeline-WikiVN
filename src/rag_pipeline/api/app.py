@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(
     title="Vietnam Tourism RAG API",
-    version="0.2.0",
+    version="0.3.0",
     description="API cho RAG pipeline hỏi đáp du lịch Việt Nam",
     lifespan=lifespan,
 )
