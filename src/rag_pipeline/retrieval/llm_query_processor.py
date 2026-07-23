@@ -9,7 +9,7 @@ import time
 import httpx
 
 from rag_pipeline.config import LLMQueryConfig
-from rag_pipeline.retrieval.query_cache import CachedQuery, QueryCache
+from rag_pipeline.retrieval.query_cache import QueryCache
 
 
 class ProcessedQuery:
@@ -91,57 +91,48 @@ Chỉ trả về JSON hợp lệ theo định dạng:
     def process(
         self, query: str, conversation_context: str | None = None
     ) -> ProcessedQuery:
-        """Process a query, using cache when available.
+        """Process a query.
 
-        When ``conversation_context`` is provided, the cache is bypassed
-        because the rewrite depends on prior turns, not just the raw
-        query.
+        The LLM rewrite is **disabled**: the normalized query is used directly
+        as the search string and the intent defaults to ``"factual"``. This
+        removes a 3-10s blocking LLM round-trip (deepseek via OpenRouter, often
+        rate-limited / queued) that dominated latency for marginal benefit.
+
+        Multi-turn coreference is instead handled by the conversation memory
+        passed to the generator (see ``RAGPipeline.answer_stream``), so the
+        rewrite is not needed for follow-up questions either.
+
+        The original LLM rewrite path is preserved below (commented out) in
+        case retrieval quality needs it back — re-enable by uncommenting and
+        removing the early return.
         """
         normalized = self.normalize_query(query)
-
-        if conversation_context is None:
-            cached = self.cache.get(
-                self.config.model_name,
-                self.config.prompt_version,
-                query,
-                ttl_days=self.config.cache_ttl_days,
-            )
-            if cached is not None:
-                return ProcessedQuery(
-                    raw_query=query,
-                    normalized_query=normalized,
-                    rewritten_query=cached.rewritten_query,
-                    intent=cached.intent,
-                    from_cache=True,
-                )
-
-        try:
-            rewritten, intent = self._call_llm(normalized, conversation_context)
-        except Exception:
-            if self.config.fallback_to_normalized:
-                rewritten, intent = normalized, "factual"
-            else:
-                raise
-
-        # Only cache results that don't depend on conversation context.
-        if conversation_context is None:
-            self.cache.set(
-                CachedQuery(
-                    raw_query=query,
-                    rewritten_query=rewritten,
-                    intent=intent,
-                    model_name=self.config.model_name,
-                    prompt_version=self.config.prompt_version,
-                )
-            )
 
         return ProcessedQuery(
             raw_query=query,
             normalized_query=normalized,
-            rewritten_query=rewritten,
-            intent=intent,
+            rewritten_query=normalized,
+            intent="factual",
             from_cache=False,
         )
+
+        # ── Original LLM rewrite (DISABLED — preserved for quality) ─────────
+        # if conversation_context is None:
+        #     ...cache lookup omitted...
+        # try:
+        #     rewritten, intent = self._call_llm(normalized, conversation_context)
+        # except Exception:
+        #     if self.config.fallback_to_normalized:
+        #         rewritten, intent = normalized, "factual"
+        #     else:
+        #         raise
+        # return ProcessedQuery(
+        #     raw_query=query,
+        #     normalized_query=normalized,
+        #     rewritten_query=rewritten,
+        #     intent=intent,
+        #     from_cache=False,
+        # )
 
     def _call_llm(
         self, normalized_query: str, conversation_context: str | None = None

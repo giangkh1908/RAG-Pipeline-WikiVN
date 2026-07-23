@@ -13,6 +13,13 @@ from rag_pipeline.api.dependencies import PipelineStore
 from rag_pipeline.generation.models import AnswerResult, GenerationEvent
 
 
+@pytest.fixture(autouse=True)
+def _generation_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The chat dependency may build the real generator via get_conversation_store;
+    supply a dummy key so construction does not raise (the pipeline itself is mocked)."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)

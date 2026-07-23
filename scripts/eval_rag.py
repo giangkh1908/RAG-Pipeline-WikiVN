@@ -88,7 +88,7 @@ def build_components(config: RAGConfig) -> dict[str, Any]:
     dense_embedder = DenseEmbedder(config.retrieval.dense)
     sparse_embedder = SparseEmbedder(config.retrieval.sparse)
 
-    cache = QueryCache(config.retrieval.storage.db_path)
+    cache = QueryCache(storage)
     llm_processor = LLMQueryProcessor(config.retrieval.llm_query, cache=cache)
     filter_builder = FilterBuilder()
     retriever = HybridRetriever(

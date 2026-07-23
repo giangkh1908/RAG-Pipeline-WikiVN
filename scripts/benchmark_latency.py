@@ -56,6 +56,7 @@ class StageTimings:
     generation_total_ms: float = 0.0
     generation_tokens: int = 0
     e2e_ms: float = 0.0
+    e2e_ttft_ms: float = 0.0
 
 
 @dataclass
@@ -90,7 +91,7 @@ def build_components(config: RAGConfig) -> dict[str, Any]:
     dense_embedder = DenseEmbedder(config.retrieval.dense)
     sparse_embedder = SparseEmbedder(config.retrieval.sparse)
 
-    cache = QueryCache(config.retrieval.storage.db_path)
+    cache = QueryCache(storage)
     llm_processor = LLMQueryProcessor(config.retrieval.llm_query, cache=cache)
     filter_builder = FilterBuilder()
     retriever = HybridRetriever(
@@ -205,8 +206,13 @@ def benchmark_e2e(components: dict[str, Any], query: str) -> float:
         components["answer_generator"],
     )
     t0 = time.perf_counter()
-    list(pipeline.answer_stream(query))
-    return (time.perf_counter() - t0) * 1000
+    first_token_ms: float | None = None
+    for event in pipeline.answer_stream(query):
+        # e2e TTFT = time until the first answer token the user sees.
+        if first_token_ms is None and getattr(event, "type", None) == "token":
+            first_token_ms = (time.perf_counter() - t0) * 1000
+    total_ms = (time.perf_counter() - t0) * 1000
+    return total_ms, first_token_ms if first_token_ms is not None else total_ms
 
 
 def compute_summary(timings: list[StageTimings]) -> dict[str, dict[str, float]]:
@@ -222,6 +228,7 @@ def compute_summary(timings: list[StageTimings]) -> dict[str, dict[str, float]]:
         "generation_ttft_ms",
         "generation_total_ms",
         "e2e_ms",
+        "e2e_ttft_ms",
     ]
     summary: dict[str, dict[str, float]] = {}
     for metric in metrics:
@@ -301,7 +308,7 @@ def main() -> None:
         for i, query in enumerate(queries, 1):
             print(f"[{i}/{len(queries)}] {query}")
             timings = benchmark_query(components, query)
-            timings.e2e_ms = benchmark_e2e(components, query)
+            timings.e2e_ms, timings.e2e_ttft_ms = benchmark_e2e(components, query)
             result.queries.append(timings)
     finally:
         components["dense_embedder"].close()

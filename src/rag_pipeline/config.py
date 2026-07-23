@@ -80,7 +80,7 @@ class ContextBuilderConfig:
 class GenerationConfig:
     """Configuration for LLM answer generation."""
 
-    model_name: str = "openai/gpt-4o-mini"
+    model_name: str = "poolside/laguna-s-2.1"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
     max_tokens: int = 800
