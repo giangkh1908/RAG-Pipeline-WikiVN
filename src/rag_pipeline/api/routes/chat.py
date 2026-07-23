@@ -29,6 +29,14 @@ from rag_pipeline.storage.conversation import ConversationStore
 router = APIRouter(tags=["chat"])
 _executor = ThreadPoolExecutor(max_workers=4)
 
+# Token-stream batching. Instead of one SSE event per LLM token (many tiny
+# events, lots of frontend re-renders), accumulate tokens and flush either when
+# the buffer reaches ``_FLUSH_CHARS`` or ``_FLUSH_INTERVAL`` seconds elapse.
+# Time-based flush gives a natural typing feel and degrades gracefully when
+# token production is slow; the char cap bounds event size on fast bursts.
+_FLUSH_CHARS = 32
+_FLUSH_INTERVAL = 0.04  # 40 ms
+
 
 def _to_source_response(source: dict[str, Any]) -> SourceResponse:
     return SourceResponse(
@@ -117,12 +125,54 @@ async def chat_stream(
     _executor.submit(_run)
 
     async def _generate() -> Any:
+        buffer = ""
+        last_flush = time.monotonic()
+
+        def _flush() -> str:
+            # Emit the buffered tokens as a single SSE event and reset state.
+            nonlocal buffer, last_flush
+            line = f"data: {json.dumps({'type': 'token', 'content': buffer}, ensure_ascii=False)}\n\n"
+            buffer = ""
+            last_flush = time.monotonic()
+            return line
+
         while True:
-            event = await queue.get()
+            # Flush on the time threshold while tokens are pending.
+            if buffer and (time.monotonic() - last_flush) >= _FLUSH_INTERVAL:
+                yield _flush()
+                continue
+
+            if buffer:
+                remaining = _FLUSH_INTERVAL - (time.monotonic() - last_flush)
+                if remaining <= 0:
+                    yield _flush()
+                    continue
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    yield _flush()
+                    continue
+            else:
+                # No pending tokens: wait for the next event without polling.
+                event = await queue.get()
+
             if event is None:
+                # Stream finished — flush any remaining buffered tokens.
+                if buffer:
+                    yield _flush()
                 break
-            payload = _event_to_payload(event)
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+            if event.type == "token":
+                buffer += event.data or ""
+                if len(buffer) >= _FLUSH_CHARS or (time.monotonic() - last_flush) >= _FLUSH_INTERVAL:
+                    yield _flush()
+            else:
+                # progress / done / error: flush pending tokens first, then
+                # emit the event immediately (status + finalization stay snappy).
+                if buffer:
+                    yield _flush()
+                payload = _event_to_payload(event)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         _generate(),
