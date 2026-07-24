@@ -35,7 +35,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 # Time-based flush gives a natural typing feel and degrades gracefully when
 # token production is slow; the char cap bounds event size on fast bursts.
 _FLUSH_CHARS = 32
-_FLUSH_INTERVAL = 0.04  # 40 ms
+_FLUSH_INTERVAL = 0.01  # 10 ms — snappy first token; still batches fast bursts
 
 
 def _to_source_response(source: dict[str, Any]) -> SourceResponse:
