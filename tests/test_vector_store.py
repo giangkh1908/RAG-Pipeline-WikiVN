@@ -8,7 +8,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from rag_pipeline.config import QdrantConfig
+from rag_pipeline.config import DenseEmbeddingConfig, QdrantConfig
 from rag_pipeline.indexing.vector_store import QdrantVectorStore
 from rag_pipeline.storage.models import IndexEntry
 
@@ -21,7 +21,7 @@ class TestQdrantVectorStore:
         mock_client.get_collections.return_value.collections = []
 
         store = QdrantVectorStore(QdrantConfig())
-        store.create_collection(dense_dim=2048)
+        store.create_collection(dense_dim=DenseEmbeddingConfig().dense_dim)
 
         mock_client.create_collection.assert_called_once()
         call_kwargs = mock_client.create_collection.call_args.kwargs

@@ -62,7 +62,7 @@ def main() -> int:
     # Prepare vector store and create collection up-front.
     vector_store = QdrantVectorStore(config.qdrant)
     print("Creating Qdrant collection if needed...")
-    vector_store.create_collection(dense_dim=2048, recreate=False)
+    vector_store.create_collection(dense_dim=config.dense.dense_dim, recreate=False)
 
     # Prepare embedders and indexing service.
     dense_embedder = DenseEmbedder(config.dense)

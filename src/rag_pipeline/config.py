@@ -15,9 +15,17 @@ class ChunkingConfig:
 
 @dataclass(slots=True)
 class DenseEmbeddingConfig:
-    """Configuration for dense embedding via OpenRouter."""
+    """Configuration for dense embedding via OpenRouter.
+
+    ``dense_dim`` MUST match the output dimension of ``model_name`` — it is
+    the single source of truth used to size the Qdrant dense vector collection
+    at index time. Mismatch causes Qdrant upsert/search to fail. Update both
+    together when switching models (and re-index, since stored vectors become
+    invalid).
+    """
 
     model_name: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+    dense_dim: int = 2048
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
     timeout_seconds: float = 30.0

@@ -28,10 +28,42 @@ class QdrantVectorStore:
         collections = self._client.get_collections().collections
         return any(c.name == self.config.collection_name for c in collections)
 
+    def _existing_dense_dim(self) -> int | None:
+        """Return the dense vector size of an existing collection.
+
+        Returns ``None`` when the collection does not exist or the dense
+        vector size cannot be determined. Used to detect a model switch that
+        changed the embedding dimension so a stale-dim collection is not
+        silently kept (which would crash at query time with a dim mismatch).
+        """
+        try:
+            info = self._client.get_collection(self.config.collection_name)
+        except Exception:
+            return None
+        vectors = info.config.params.vectors
+        if isinstance(vectors, dict):
+            params = vectors.get(self.config.dense_vector_name)
+            return params.size if params is not None else None
+        return getattr(vectors, "size", None)
+
     def create_collection(self, dense_dim: int, recreate: bool = False) -> None:
-        """Create the Qdrant collection with dense and sparse vectors."""
+        """Create the Qdrant collection with dense and sparse vectors.
+
+        When the collection already exists and ``recreate`` is False, the
+        existing dense dimension is compared to ``dense_dim`` and a
+        ``RuntimeError`` is raised on mismatch — fail-fast at init time rather
+        than silently keeping stale vectors that crash at query time. Pass
+        ``recreate=True`` (or wipe the Qdrant volume) to re-index at a new dim.
+        """
         if self.collection_exists():
             if not recreate:
+                existing = self._existing_dense_dim()
+                if existing is not None and existing != dense_dim:
+                    raise RuntimeError(
+                        f"Qdrant collection {self.config.collection_name!r} exists at "
+                        f"dense dim {existing} but {dense_dim} was requested. Pass "
+                        f"recreate=True or wipe the Qdrant volume to re-index."
+                    )
                 return
             self._client.delete_collection(self.config.collection_name)
 

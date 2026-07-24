@@ -56,8 +56,12 @@ jobs:
             set -e
             cd /opt/rag
 
-            # Pull the latest code and compose file
-            git pull
+            # Pull the latest code and compose file. Use reset --hard so the
+            # deploy is idempotent even when origin/main moves backward (force
+            # pushes) or diverges from the server's local checkout — a plain
+            # `git pull` would attempt a merge and abort under `set -e`.
+            git fetch origin
+            git reset --hard origin/main
 
             # Ensure .env exists
             if [ ! -f .env ]; then

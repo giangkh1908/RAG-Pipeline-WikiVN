@@ -77,7 +77,7 @@ def _full_ingest(project_root: Path) -> int:
     )
     storage = SQLiteStorage(config.storage.db_path)
     vector_store = QdrantVectorStore(config.qdrant)
-    vector_store.create_collection(dense_dim=2048, recreate=False)
+    vector_store.create_collection(dense_dim=config.dense.dense_dim, recreate=False)
 
     dense_embedder = DenseEmbedder(config.dense)
     sparse_embedder = SparseEmbedder(config.sparse)
@@ -117,8 +117,9 @@ def main() -> int:
 
     db_path = project_root / "data" / "rag_storage.db"
     storage = SQLiteStorage(str(db_path))
+    dense_config = DenseEmbeddingConfig()
     vector_store = QdrantVectorStore(QdrantConfig())
-    vector_store.create_collection(dense_dim=2048, recreate=False)
+    vector_store.create_collection(dense_dim=dense_config.dense_dim, recreate=False)
 
     print("=== Deployment Initialization ===")
 

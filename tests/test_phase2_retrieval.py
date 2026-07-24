@@ -24,7 +24,8 @@ from rag_pipeline.storage import SQLiteStorage
 @pytest.fixture
 def temp_cache() -> QueryCache:
     with tempfile.TemporaryDirectory() as tmpdir:
-        cache = QueryCache(db_path=os.path.join(tmpdir, "rag_storage.db"))
+        storage = SQLiteStorage(os.path.join(tmpdir, "rag_storage.db"))
+        cache = QueryCache(storage=storage)
         yield cache
         cache.close()
 
@@ -91,44 +92,34 @@ class TestQueryCache:
 
 class TestLLMQueryProcessor:
     @patch("rag_pipeline.retrieval.llm_query_processor.httpx.Client")
-    def test_process_calls_llm_and_caches_result(
+    def test_process_returns_normalized_query_without_llm(
         self,
         mock_client_class: MagicMock,
         temp_cache: QueryCache,
         llm_config: LLMQueryConfig,
     ) -> None:
+        # Query rewrite is disabled: process() returns the normalized query
+        # directly with intent "factual" and never calls the LLM, so there is
+        # no rewrite round-trip and nothing is read from / written to the cache.
         os.environ["OPENROUTER_API_KEY"] = "test-key"
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "rewritten_query": "câu hỏi về du lịch việt nam",
-                                "intent": "factual",
-                                "reasoning": "test",
-                            }
-                        )
-                    }
-                }
-            ]
-        }
         mock_client = MagicMock()
-        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         processor = LLMQueryProcessor(config=llm_config, cache=temp_cache)
         result = processor.process("du lịch việt nam")
 
-        assert result.rewritten_query == "câu hỏi về du lịch việt nam"
+        assert result.normalized_query == "du lịch việt nam"
+        assert result.rewritten_query == "du lịch việt nam"
         assert result.intent == "factual"
         assert result.from_cache is False
 
-        # Second call should hit cache
+        # The LLM is never called.
+        assert mock_client.post.call_count == 0
+
+        # A second call is also uncached (rewrite disabled -> no cache use).
         result2 = processor.process("du lịch việt nam")
-        assert result2.from_cache is True
-        assert mock_client.post.call_count == 1
+        assert result2.from_cache is False
+        assert mock_client.post.call_count == 0
 
     @patch("rag_pipeline.retrieval.llm_query_processor.httpx.Client")
     def test_process_fallback_on_llm_failure(
@@ -137,6 +128,8 @@ class TestLLMQueryProcessor:
         temp_cache: QueryCache,
         llm_config: LLMQueryConfig,
     ) -> None:
+        # With rewrite disabled the LLM is not called, so a failing client is
+        # irrelevant: the normalized query is returned regardless.
         os.environ["OPENROUTER_API_KEY"] = "test-key"
         mock_client = MagicMock()
         mock_client.post.side_effect = RuntimeError("network error")
