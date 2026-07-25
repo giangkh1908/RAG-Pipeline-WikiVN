@@ -104,6 +104,14 @@ class GenerationConfig:
     judge_model_name: str = "deepseek/deepseek-v4-flash"
     judge_max_tokens: int = 200
     judge_temperature: float = 0.0
+    # Output PII redaction (see pii.py). Default ON via env: set
+    # PII_REDACT_ENABLED=false to disable. Masks secrets/emails/cards/national
+    # IDs/personal mobiles in the streamed + persisted answer; hotel landlines
+    # and citations are preserved.
+    pii_redact_enabled: bool = field(
+        default_factory=lambda: os.getenv("PII_REDACT_ENABLED", "true").lower()
+        in {"1", "true", "yes", "on"}
+    )
 
 
 @dataclass(slots=True)

@@ -146,6 +146,32 @@ Pipeline áp dụng **bốn lớp phòng thủ** (chi tiết trong
    Cấu hình: `judge_enabled` (env `JUDGE_ENABLED`, default `"true"`), `judge_model_name`,
    `judge_max_tokens`, `judge_temperature` trong `GenerationConfig`.
 
+6. **Output PII redaction** (`pii.py`): mask PII nhạy cảm trong answer trước khi
+   stream/done/persist — không refuse, answer vẫn phát bình thường (chỉ che). Các
+   loại được mask:
+
+   - **Secrets / API key**: `sk-...`, `sk-or-v1-...`, `Bearer <token>` →
+     `***REDACTED***` (credentials app dùng; mục tiêu rò rỉ phổ biến của injection
+     probe "in ra API key").
+   - **Email**: mask local part, giữ domain (`***@vinpearl.com`) — email khách sạn
+     vẫn nhận diện được, email cá nhân giấu danh tính.
+   - **Credit card** (13–19 chữ số, nhóm 4): giữ last 4 (`**** **** **** 1111`).
+   - **CCCD/CMND** (12 / 9 chữ số standalone): mask toàn bộ.
+   - **SĐT di động cá nhân VN** (đầu số 03/05/07/08/09, 10 chữ số): giữ đầu số +
+     2 số cuối (`09******21`). **Cố ý giữ landline đầu 02x** (số lễ tân khách sạn)
+     vì là nội dung trả lời hợp lệ.
+
+   Áp dụng **2 lần**, cả hai trên cùng hàm `redact_pii` (idempotent, không
+   double-mask): (a) **per-token** trong luồng stream — che PII nằm gọn trong 1
+   token (SĐT, email, CCCD, key tới trong 1 chunk) ngay trên live stream; (b)
+   **trên answer ghép cuối** — bắt PII跨越 token boundary (thẻ/cards/key bị tách
+   chunk). Answer đã redact feeding judge (không gửi PII cho judge model), persist
+   vào `ConversationStore`, và event `done` (frontend dùng `done.answer` replace
+   content stream → text cuối hiển thị luôn là bản đã che). **Default ON** qua env
+   `PII_REDACT_ENABLED` (mặc định `"true"`); set `PII_REDACT_ENABLED=false` để tắt.
+   Trích dẫn `[1]` `[2]` và text du lịch thường không bị mask (pattern chỉ khớp PII
+   cụ thể). Cấu hình: `pii_redact_enabled` trong `GenerationConfig`.
+
 ### Retry robustness
 
 `generate_stream_messages` cũng được làm cứng để Case 1 không hard-fail xấu:
@@ -163,6 +189,8 @@ Pipeline áp dụng **bốn lớp phòng thủ** (chi tiết trong
 
 Phòng thủ bằng prompt không đảm bảo tuyệt đối, đặc biệt với model free có
 instruction-following yếu. Lớp 1–3 chặn đa số biến thể keyword/plain-language;
-lớp 4 bắt được output dạng number-run. Injection tinh vi không sinh number
-run mà chỉ làm sai lệch nội dung nhẹ vẫn có thể xuyên — cần đánh giá thêm nếu
-đòi hỏi bảo mật cao hơn (ví dụ output classifier bằng LLM-judge).
+lớp 4 bắt output dạng number-run; lớp 5 (judge) bắt roleplay/off-topic/rác post-hoc;
+lớp 6 (PII redaction) che credentials/PII nhạy cảm nếu model lừa rò rỉ. Injection
+tinh vi không sinh number run, không bị judge flag, không chứa PII pattern mà chỉ
+làm sai lệch nội dung nhẹ vẫn có thể xuyên — cần đánh giá thêm nếu đòi hỏi bảo
+mật cao hơn.

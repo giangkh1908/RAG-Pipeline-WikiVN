@@ -465,3 +465,65 @@ class TestRAGPipeline:
         assert len(done_events) == 1
         assert error_events == []  # judge failure must NOT reject
         gen.judge_answer.assert_called_once()
+
+    def _pii_pipeline(self, pii_on: bool, tokens: list[str]) -> RAGPipeline:
+        result = RetrievalResult(
+            chunk_id=uuid4(),
+            content="Chunk content",
+            rrf_score=0.9,
+            rank=1,
+            metadata={"title": "Topic"},
+        )
+        retrieval_pipeline = MagicMock()
+        processed = MagicMock()
+        processed.rewritten_query = "rewritten"
+        processed.normalized_query = "query"
+        processed.intent = "factual"
+        retrieval_pipeline.preprocess.return_value = processed
+        retrieval_pipeline.search_processed.return_value = [result]
+
+        answer_generator = MagicMock()
+        answer_generator.generate_stream.return_value = iter(tokens)
+        answer_generator.config.judge_enabled = False  # isolate PII path
+        answer_generator.config.pii_redact_enabled = pii_on
+        answer_generator.judge_answer.return_value = None
+
+        return RAGPipeline(retrieval_pipeline, CitationContextBuilder(), answer_generator)
+
+    def test_pii_redacts_phone_in_done_answer(self) -> None:
+        pipeline = self._pii_pipeline(
+            True, ["Lien he sdt ", "0987654321", " nhe."]
+        )
+        events = list(pipeline.answer_stream("query"))
+
+        done = [e for e in events if e.type == "done"][0]
+        assert "0987654321" not in done.data.answer
+        assert "09" in done.data.answer and "21" in done.data.answer  # prefix+last2 kept
+
+    def test_pii_preserves_landline(self) -> None:
+        pipeline = self._pii_pipeline(
+            True, ["Khach san ", "02363888888", " o Da Nang."]
+        )
+        events = list(pipeline.answer_stream("query"))
+
+        done = [e for e in events if e.type == "done"][0]
+        assert "02363888888" in done.data.answer  # landline kept
+
+    def test_pii_disabled_keeps_raw(self) -> None:
+        pipeline = self._pii_pipeline(
+            False, ["Lien he ", "0987654321"]
+        )
+        events = list(pipeline.answer_stream("query"))
+
+        done = [e for e in events if e.type == "done"][0]
+        assert "0987654321" in done.data.answer  # not masked when disabled
+
+    def test_pii_redacts_streamed_token(self) -> None:
+        pipeline = self._pii_pipeline(
+            True, ["0987654321"]  # mobile arrives as a single token
+        )
+        events = list(pipeline.answer_stream("query"))
+
+        token_events = [e for e in events if e.type == "token"]
+        streamed = "".join(t.data for t in token_events)
+        assert "0987654321" not in streamed  # masked live, not just at done

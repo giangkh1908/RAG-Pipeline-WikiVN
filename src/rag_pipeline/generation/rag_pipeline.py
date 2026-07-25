@@ -18,6 +18,7 @@ from rag_pipeline.generation.models import (
     BuiltContext,
     GenerationEvent,
 )
+from rag_pipeline.generation.pii import redact_pii
 from rag_pipeline.generation.prompt_safety import (
     detect_injection,
     looks_like_number_run,
@@ -208,7 +209,14 @@ class RAGPipeline:
 
         answer_parts: list[str] = []
         spammy = False
+        pii_on = self.answer_generator.config.pii_redact_enabled
         for token in token_iter:
+            # PII redaction per-token: masks single-token PII (phone, email,
+            # CCCD, secrets that arrive in one chunk) in the live stream.
+            # Multi-token PII is caught by the final redact_pii pass below;
+            # redact_pii is idempotent so this never double-masks.
+            if pii_on:
+                token = redact_pii(token)
             answer_parts.append(token)
             yield GenerationEvent(type="token", data=token)
             # Output guard: abort early if the model starts emitting a numeric
@@ -242,6 +250,15 @@ class RAGPipeline:
 
         answer = "".join(answer_parts)
         answer = self._strip_question_echo(query, answer)
+
+        # PII redaction on the assembled answer: catches multi-token PII that
+        # spanned token boundaries (e.g. a credit card / API key split across
+        # chunks). This redacted answer feeds the judge, the persisted turn,
+        # and the `done` event (which the frontend uses to replace the live
+        # streamed text), so the final displayed answer is always masked.
+        # Idempotent over the per-token pass above.
+        if pii_on:
+            answer = redact_pii(answer)
 
         # LLM-judge output classifier (opt-in). Post-hoc: tokens have already
         # streamed, so a rejection replaces the streamed answer with a refusal
