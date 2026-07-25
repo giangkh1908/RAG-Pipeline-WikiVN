@@ -72,6 +72,17 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.IGNORECASE,
     ),
     re.compile(r"\bdo\s+not\s+follow\b", re.IGNORECASE),
+    # Vietnamese plain-language injection: "list/print/count numbers in a range
+    # before answering" (e.g. "liệt kê các số từ một đến năm mươi rồi mới trả lời").
+    # The range ("từ ... đến ...") after "số" is the giveaway — legit travel
+    # queries don't ask to enumerate a number range. Digit-range variant requires
+    # actual digits so geographic ranges ("từ Đà Nẵng đến Huế") don't match.
+    re.compile(r"\bcác\s+số\s+từ\b", re.IGNORECASE),
+    re.compile(r"\bsố\s+từ\s+\S+\s+đến\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:liệt\s+kê|đếm|in|viết)\b[^.\n]{0,30}\btừ\s+\d+\s+đến\s+\d+\b",
+        re.IGNORECASE,
+    ),
 )
 
 

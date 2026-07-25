@@ -102,13 +102,21 @@ Pipeline áp dụng **bốn lớp phòng thủ** (chi tiết trong
    message và fence `current_question`).
 
 3. **Input filter** (`detect_injection`): regex nhận diện các signature
-   injection (`# ROLE`, `TOOL POLICY`, `SYSTEM PROMPT`, `NEW INSTRUCTIONS`,
-   `function name (`, `for (int`, `print(`, `exec(`/`eval(`,
-   `ignore ... previous instructions`, `do not follow`) **trước** khi gọi
-   retrieval/LLM. Nếu khớp, `answer_stream` phát ngay event `error`
-   (`_INJECTION_MESSAGE`) và trả về — không tốn LLM call, không persist history.
-   An toàn với câu hỏi du lịch tiếng Việt bình thường (các pattern là
-   tiếng Anh/code, không trùng input hợp lệ).
+   injection **trước** khi gọi retrieval/LLM. Nếu khớp, `answer_stream` phát
+   ngay event `error` (`_INJECTION_MESSAGE`) và trả về — không tốn LLM call,
+   không persist history. Các pattern:
+
+   - Code/keyword: `# ROLE`, `TOOL POLICY`, `SYSTEM PROMPT`, `NEW INSTRUCTIONS`,
+     `function name (`, `for (int`, `print(`, `exec(`/`eval(`,
+     `ignore ... previous instructions`, `do not follow`.
+   - Vietnamese plain-language "liệt kê/in/đếm số trong khoảng rồi mới trả lời"
+     (vd `"liệt kê các số từ một đến năm mươi"`): `các số từ`, `số từ … đến …`,
+     và biến thể `(liệt kê|đếm|in|viết) … từ <digit> đến <digit>`. Biến thể digit
+     yêu cầu số thực để khoảng địa lý (`"từ Đà Nẵng đến Huế"`) không false-positive.
+
+   An toàn với câu hỏi du lịch tiếng Việt bình thường — các pattern tiếng Anh/code
+   không trùng input hợp lệ; pattern Việt chỉ khớp khi có "số … từ … đến …"
+   (range số), không trùng "liệt kê các bãi biển", "số điện thoại", "bao nhiêu ngày".
 
 4. **Output guard** (`looks_like_number_run`): backstop trong luồng streaming.
    Nếu model bắt đầu sinh run 5+ dòng pure-digit tăng dần (`1\n2\n3\n4\n5`) —
