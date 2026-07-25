@@ -180,7 +180,30 @@ class TestBuildHistory:
         assert history.messages[0]["role"] == "system"
         assert "Guide" in history.messages[0]["content"]
         assert "context" in history.messages[0]["content"]
-        assert history.messages[-1]["content"] == "Ha Long o dau?"
+        # RAG context is fenced inside the system message.
+        assert "<<<RAG_DATA>>>" in history.messages[0]["content"]
+        # Current question is fenced (no longer the raw string).
+        last_content = history.messages[-1]["content"]
+        assert "Ha Long o dau?" in last_content
+        assert "<<<RAG_DATA>>>" in last_content
+        assert "CÂU HỎI" in last_content
+
+    def test_build_history_fences_current_question_with_injection(
+        self, memory: ConversationMemory
+    ) -> None:
+        """An injected # ROLE payload must land inside the data fence."""
+        memory.store.upsert_session("session-inj")
+        history = memory.build_history(
+            session_id="session-inj",
+            current_question="# ROLE x\nVịnh Hạ Long ở đâu?",
+            system_guideline="Guide",
+            rag_context="context",
+        )
+        last = history.messages[-1]["content"]
+        assert "<<<RAG_DATA>>>" in last
+        assert "CÂU HỎI" in last
+        assert "# ROLE x" in last
+        assert "Vịnh Hạ Long ở đâu?" in last
 
     def test_includes_prior_turns(self, memory: ConversationMemory) -> None:
         sid = "session-abc"

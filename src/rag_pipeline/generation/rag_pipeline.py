@@ -18,6 +18,10 @@ from rag_pipeline.generation.models import (
     BuiltContext,
     GenerationEvent,
 )
+from rag_pipeline.generation.prompt_safety import (
+    detect_injection,
+    looks_like_number_run,
+)
 from rag_pipeline.retrieval import FilterBuilder, HybridRetriever, LLMQueryProcessor
 from rag_pipeline.retrieval.query_cache import QueryCache
 from rag_pipeline.retrieval.retrieval_pipeline import RetrievalPipeline
@@ -29,6 +33,14 @@ class RAGPipeline:
     """Full RAG pipeline: retrieval → context → answer generation."""
 
     _NO_CONTEXT_MESSAGE = "Không đủ thông tin để trả lời câu hỏi này."
+    _INJECTION_MESSAGE = (
+        "Tôi chỉ có thể trả lời câu hỏi du lịch Việt Nam. "
+        "Vui lòng hỏi lại bằng một câu hỏi thông thường."
+    )
+    _SPAMMY_OUTPUT_MESSAGE = (
+        "Tôi không thể trả lời yêu cầu này. "
+        "Vui lòng đặt một câu hỏi du lịch cụ thể."
+    )
 
     def __init__(
         self,
@@ -108,6 +120,12 @@ class RAGPipeline:
         memory_used = False
         turn_no: int | None = None
         store: ConversationStore | None = self.memory.store if self.memory else None
+
+        # Input filter: reject known prompt-injection payloads before any
+        # retrieval/LLM work. Injected queries are not persisted to history.
+        if detect_injection(query):
+            yield GenerationEvent(type="error", message=self._INJECTION_MESSAGE)
+            return
 
         if store is not None and session_id is not None:
             store.upsert_session(session_id)
@@ -189,9 +207,38 @@ class RAGPipeline:
             token_iter = self.answer_generator.generate_stream(query, built.context)
 
         answer_parts: list[str] = []
+        spammy = False
         for token in token_iter:
             answer_parts.append(token)
             yield GenerationEvent(type="token", data=token)
+            # Output guard: abort early if the model starts emitting a numeric
+            # run (the signature of the injected "print 1..50" payload). Only
+            # check while the answer is short — a number run triggers within a
+            # few lines, and a legit answer that long without triggering is fine.
+            running = "".join(answer_parts)
+            if len(running) <= 600 and looks_like_number_run(running):
+                spammy = True
+                break
+
+        if spammy:
+            # Close the underlying stream deterministically (real generators
+            # expose .close(); plain iterators from tests do not).
+            close = getattr(token_iter, "close", None)
+            if close is not None:
+                close()
+            if store is not None and session_id is not None and turn_no is not None:
+                try:
+                    store.update_turn_answer(
+                        session_id,
+                        turn_no,
+                        self._SPAMMY_OUTPUT_MESSAGE,
+                        processed.intent,
+                        0,
+                    )
+                except Exception:
+                    pass
+            yield GenerationEvent(type="error", message=self._SPAMMY_OUTPUT_MESSAGE)
+            return
 
         answer = "".join(answer_parts)
         answer = self._strip_question_echo(query, answer)

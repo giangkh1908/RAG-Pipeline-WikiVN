@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from rag_pipeline.config import MemoryConfig
+from rag_pipeline.generation.prompt_safety import fence_context, fence_query
 from rag_pipeline.storage.conversation import ChatTurn, ConversationStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -127,7 +128,7 @@ class ConversationMemory:
         # 1. System guideline + RAG context.
         system_content = system_guideline
         if rag_context:
-            system_content = f"{system_guideline}\n\nNGỮ CẢNH:\n{rag_context}"
+            system_content = f"{system_guideline}\n\nNGỮ CẢNH:\n{fence_context(rag_context)}"
         messages.append({"role": "system", "content": system_content})
 
         # 2. Cached summary (if any) — kept as a user-role turn so the LLM
@@ -144,7 +145,7 @@ class ConversationMemory:
                 messages.append({"role": "assistant", "content": turn.answer})
 
         # 4. Current question.
-        messages.append({"role": "user", "content": current_question})
+        messages.append({"role": "user", "content": fence_query(current_question)})
 
         return BuiltHistory(
             messages=messages,

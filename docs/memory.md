@@ -82,6 +82,14 @@ RAGPipeline.answer_stream(query, session_id)
 [FE] render tokens → khi 'done' cập nhật UI + lưu session_id mới (nếu server đổi)
 ```
 
+> **Bảo mật:** trong bước `build_history`, `rag_context` (ghép vào system message)
+> và `current_question` (message cuối) được bọc trong fence
+> `<<<RAG_DATA>>>` (`fence_context` / `fence_query` từ `prompt_safety`) để chống
+> prompt injection từ câu hỏi người dùng. Xem chi tiết ở
+> [`generation.md` § Bảo mật prompt injection](./generation.md#bảo-mật-prompt-injection).
+> (Câu hỏi của các lượt trước — prior turns — và summary chưa được fence, nằm
+> ngoài scope lần này.)
+
 ---
 
 ## 3. Công thức token budget
