@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from rag_pipeline.generation.judge import judge_answer
+from rag_pipeline.config import GenerationConfig
 
 
 def _mock_post_response(content: str | None) -> MagicMock:
@@ -94,3 +95,20 @@ class TestJudgeAnswer:
         assert len(payload["messages"]) == 2
         assert "Câu hỏi của người dùng:\nQ?" in payload["messages"][1]["content"]
         assert "Câu trả lời của trợ lý:\nA" in payload["messages"][1]["content"]
+
+
+class TestJudgeConfigToggle:
+    def test_default_on_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("JUDGE_ENABLED", raising=False)
+        assert GenerationConfig().judge_enabled is True
+
+    def test_disabled_via_env_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JUDGE_ENABLED", "false")
+        assert GenerationConfig().judge_enabled is False
+
+    def test_enabled_via_env_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JUDGE_ENABLED", "true")
+        assert GenerationConfig().judge_enabled is True
+
+    def test_judge_model_default(self) -> None:
+        assert GenerationConfig().judge_model_name == "deepseek/deepseek-v4-flash"

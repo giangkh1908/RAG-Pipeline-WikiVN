@@ -448,7 +448,7 @@ class TestRAGPipeline:
         assert error_events == []
         gen.judge_answer.assert_called_once()
 
-    def test_judge_disabled_by_default(self) -> None:
+    def test_judge_when_disabled_skips_call(self) -> None:
         pipeline, gen = self._judge_pipeline(False, None)
         events = list(pipeline.answer_stream("query"))
 

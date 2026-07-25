@@ -95,8 +95,12 @@ class GenerationConfig:
     temperature: float = 0.3
     timeout_seconds: float = 60.0
     max_retries: int = 3
-    # Post-generation LLM-judge output classifier (opt-in, see judge.py).
-    judge_enabled: bool = False
+    # Post-generation LLM-judge output classifier (see judge.py).
+    # Default ON via env: set JUDGE_ENABLED=false to disable without code change.
+    judge_enabled: bool = field(
+        default_factory=lambda: os.getenv("JUDGE_ENABLED", "true").lower()
+        in {"1", "true", "yes", "on"}
+    )
     judge_model_name: str = "deepseek/deepseek-v4-flash"
     judge_max_tokens: int = 200
     judge_temperature: float = 0.0

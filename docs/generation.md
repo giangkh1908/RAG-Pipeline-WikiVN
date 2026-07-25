@@ -118,23 +118,25 @@ Pipeline áp dụng **bốn lớp phòng thủ** (chi tiết trong
    numbered prose (`1. Hà Nội`) không khớp nên answer liệt kê hợp lệ không bị
    ảnh hưởng.
 
-5. **LLM-judge output classifier** (`judge.py`, opt-in): khi `judge_enabled=True`
-   (default **OFF**), sau khi generate xong pipeline gọi 1 LLM judge (mặc định
-   `deepseek/deepseek-v4-flash`, `temperature=0` → verdict **deterministic**) để
-   phân loại answer là "câu trả lời du lịch hợp lệ" hay "model tuân theo injection
-   / roleplay / off-topic / rác". Verdict `{"valid": false}` → emit `error`
-   (`_SPAMMY_OUTPUT_MESSAGE`) + lưu refusal. Mục đích: xử lý đúng kẽ hở mà lớp 1-4
-   miss — payload thuần Việt không keyword lọt input filter, model free non-deterministic
-   lúc bỏ qua lúc tuân theo; judge `temperature=0` cho verdict nhất quán qua nhiều lần.
-   **Hành vi post-hoc**: tokens đã stream tới client trước khi judge chạy, nên reject
-   sẽ **replace** answer đã hiển thị bằng refusal (nhất quán với output guard, frontend
-   `error` event đã replace content). **Latency**: +~1-2s trên event `done` (1 POST
-   non-streaming sau generate; TTFT không ảnh hưởng). **Safe fallback**: nếu chính
-   judge lỗi (timeout/429/JSON sai) → trả `None` → pipeline **accept** answer (judge
+5. **LLM-judge output classifier** (`judge.py`): sau khi generate xong pipeline
+   gọi 1 LLM judge (mặc định `deepseek/deepseek-v4-flash`, `temperature=0` → verdict
+   **deterministic**) để phân loại answer là "câu trả lời du lịch hợp lệ" hay "model
+   tuân theo injection / roleplay / off-topic / rác". Verdict `{"valid": false}` →
+   emit `error` (`_SPAMMY_OUTPUT_MESSAGE`) + lưu refusal. Mục đích: xử lý đúng kẽ hở
+   mà lớp 1-4 miss — payload thuần Việt không keyword lọt input filter, model free
+   non-deterministic lúc bỏ qua lúc tuân theo; judge `temperature=0` cho verdict nhất
+   quán qua nhiều lần. **Default ON** qua env `JUDGE_ENABLED` (mặc định `"true"`);
+   set `JUDGE_ENABLED=false` để tắt không sửa code. **Hành vi post-hoc**: tokens đã
+   stream tới client trước khi judge chạy, nên reject sẽ **replace** answer đã hiển
+   thị bằng refusal (nhất quán với output guard, frontend `error` event đã replace
+   content). **Latency**: +~1.4-2.5s (mean ~2.5s, đo thực tế) trên event `done` (1
+   POST non-streaming sau generate; TTFT không ảnh hưởng). **Safe fallback**: nếu
+   chính judge lỗi (timeout/429/JSON sai) → trả `None` → pipeline **accept** answer
+   (judge
    là backstop, không được reject nhầm hay hard-fail). Pattern adapt từ
    `scripts/eval_rag.judge_answer` (judge offline eval tách rời, rubric chi tiết hơn).
-   Cấu hình: `judge_enabled`, `judge_model_name`, `judge_max_tokens`, `judge_temperature`
-   trong `GenerationConfig`.
+   Cấu hình: `judge_enabled` (env `JUDGE_ENABLED`, default `"true"`), `judge_model_name`,
+   `judge_max_tokens`, `judge_temperature` trong `GenerationConfig`.
 
 ### Retry robustness
 
