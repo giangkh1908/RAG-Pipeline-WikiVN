@@ -77,8 +77,6 @@ def _fake_stream(query: str, session_id: str | None = None):
 
 _fake_pipeline.answer.side_effect = _fake_answer
 _fake_pipeline.answer_stream.side_effect = _fake_stream
-# Suggestions: fake pipeline has no real LLM → return [] → fallback defaults.
-_fake_pipeline.answer_generator.generate_suggestions.return_value = []
 
 # Swap the real pipeline (which needs Qdrant/LLM) for our fake.
 deps._state.pipeline = _fake_pipeline  # type: ignore[attr-defined]
@@ -191,25 +189,6 @@ def main() -> int:
     assert "deleted" in data
     print(f"  gc result = {data}")
     print("  ✓ GC endpoint responds")
-
-    banner("9. Suggestions endpoint (fallback to defaults)")
-    r = client.post(
-        "/api/suggestions",
-        json={
-            "session_id": sid,
-            "last_question": "Vinh Ha Long o dau?",
-            "last_answer": "Vinh Ha Long nam o Quang Ninh.",
-        },
-    )
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert "suggestions" in data
-    assert isinstance(data["suggestions"], list)
-    # With the fake pipeline, the LLM call will fail → fallback defaults.
-    assert len(data["suggestions"]) > 0
-    print(f"  suggestions = {data['suggestions'][:2]}...")
-    print(f"  fallback = {data['fallback']}")
-    print("  ✓ suggestions endpoint responds with fallback defaults")
 
     print("\nALL SMOKE TESTS PASSED")
     return 0

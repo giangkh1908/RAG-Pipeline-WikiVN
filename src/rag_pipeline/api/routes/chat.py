@@ -19,8 +19,6 @@ from rag_pipeline.api.schemas import (
     ChatRequest,
     ChatResponse,
     SourceResponse,
-    SuggestionRequest,
-    SuggestionResponse,
 )
 from rag_pipeline.generation import RAGPipeline
 from rag_pipeline.generation.models import AnswerResult, GenerationEvent
@@ -236,33 +234,3 @@ async def gc_sessions(
         return {"deleted": 0, "reason": "memory_disabled"}
     deleted = store.gc_sessions_ttl()
     return {"deleted": deleted}
-
-
-# ─── Suggestions ─────────────────────────────────────────────────────────────
-
-_DEFAULT_SUGGESTIONS = [
-    "Vịnh Hạ Long nằm ở đâu?",
-    "Du lịch Hội An nên đi mùa nào?",
-    "Có món ăn đặc sản nào ở Đà Nẵng?",
-    "Nha Trang có bãi biển nổi tiếng nào?",
-]
-
-
-@router.post("/suggestions", response_model=SuggestionResponse)
-async def suggestions(
-    request: SuggestionRequest,
-    pipeline: RAGPipeline = Depends(get_rag_pipeline),
-) -> SuggestionResponse:
-    """Generate follow-up suggestions based on the last Q&A pair."""
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        _executor,
-        pipeline.answer_generator.generate_suggestions,
-        request.last_question,
-        request.last_answer,
-    )
-    if result:
-        return SuggestionResponse(suggestions=result, fallback=False)
-    return SuggestionResponse(
-        suggestions=_DEFAULT_SUGGESTIONS, fallback=True
-    )

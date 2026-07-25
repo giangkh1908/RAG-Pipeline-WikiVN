@@ -3,7 +3,6 @@ import { useState, useRef, useEffect } from 'react';
 interface Props {
   onSend: (message: string) => void;
   disabled: boolean;
-  suggestions?: string[];
 }
 
 const MAX_CHARS = 500;
@@ -16,7 +15,7 @@ const DEFAULT_SUGGESTIONS = [
   'Nha Trang có bãi biển nổi tiếng nào?',
 ];
 
-export function ChatInput({ onSend, disabled, suggestions = [] }: Props) {
+export function ChatInput({ onSend, disabled }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -47,11 +46,11 @@ export function ChatInput({ onSend, disabled, suggestions = [] }: Props) {
 
   return (
     <div className="border-t border-gray-100 bg-white pb-3 pt-2 sm:pb-4 sm:pt-2">
-      {/* Suggestions — horizontal scroll on mobile */}
+      {/* Starter prompts — horizontal scroll on mobile */}
       {value === '' && !disabled && (
         <div className="mx-auto max-w-3xl px-3 pb-2.5 sm:px-4 sm:pb-3">
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:flex-wrap sm:justify-center">
-            {(suggestions.length > 0 ? suggestions : DEFAULT_SUGGESTIONS).map((s, i) => (
+            {DEFAULT_SUGGESTIONS.map((s, i) => (
               <button
                 key={i}
                 onClick={() => onSend(s)}

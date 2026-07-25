@@ -16,7 +16,7 @@
   }
 }
 
-/* Hide scrollbar for suggestions */
+/* Hide scrollbar for starter prompts */
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

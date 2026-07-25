@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput';
 import { MessageBubble } from './components/MessageBubble';
 
 export default function App() {
-  const { messages, isStreaming, suggestions, sendMessage, resetSession } = useChat();
+  const { messages, isStreaming, sendMessage, resetSession } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export default function App() {
       </main>
 
       {/* Input */}
-      <ChatInput onSend={sendMessage} disabled={isStreaming} suggestions={suggestions} />
+      <ChatInput onSend={sendMessage} disabled={isStreaming} />
     </div>
   );
 }

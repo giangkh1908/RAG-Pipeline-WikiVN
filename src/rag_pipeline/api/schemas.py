@@ -106,21 +106,3 @@ class StreamError(BaseModel):
 
 
 StreamEvent = StreamProgress | StreamToken | StreamDone | StreamError
-
-
-# ─── Suggestions ─────────────────────────────────────────────────────────────
-
-
-class SuggestionRequest(BaseModel):
-    """Request body for the suggestions endpoint."""
-
-    session_id: str | None = Field(default=None)
-    last_question: str = Field(..., min_length=1, max_length=500)
-    last_answer: str = Field(..., min_length=1, max_length=2000)
-
-
-class SuggestionResponse(BaseModel):
-    """Response body for the suggestions endpoint."""
-
-    suggestions: list[str] = Field(default_factory=list)
-    fallback: bool = Field(default=False, description="True if using default suggestions")

@@ -106,21 +106,3 @@ export async function healthCheck(): Promise<{ status: string; qdrant: string }>
   const res = await fetch(`${API_BASE}/api/health`);
   return res.json();
 }
-
-export async function fetchSuggestions(
-  sessionId: string | null | undefined,
-  lastQuestion: string,
-  lastAnswer: string,
-): Promise<{ suggestions: string[]; fallback: boolean }> {
-  const res = await fetch(`${API_BASE}/api/suggestions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId ?? undefined,
-      last_question: lastQuestion,
-      last_answer: lastAnswer,
-    }),
-  });
-  if (!res.ok) return { suggestions: [], fallback: true };
-  return res.json();
-}

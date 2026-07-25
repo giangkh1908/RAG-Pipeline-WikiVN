@@ -3,7 +3,6 @@ import type { Message, StreamEvent } from '../types';
 import {
   chatStream,
   clearSessionId,
-  fetchSuggestions,
   getOrCreateSessionId,
   setSessionId,
 } from '../api/client';
@@ -14,9 +13,7 @@ const nextId = () => `msg-${++msgId}`;
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const sessionIdRef = useRef<string>(getOrCreateSessionId());
-  const lastDoneRef = useRef<{ question: string; answer: string } | null>(null);
 
   const sendMessage = useCallback(async (question: string) => {
     if (isStreaming) return;
@@ -31,9 +28,6 @@ export function useChat() {
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
-    setSuggestions([]);
-
-    let doneAnswer = '';
 
     try {
       await chatStream(question, sessionIdRef.current, (event: StreamEvent) => {
@@ -62,7 +56,7 @@ export function useChat() {
             sessionIdRef.current = event.session_id;
             setSessionId(event.session_id);
           }
-          doneAnswer = event.answer.replace(/\s+$/, '');
+          const doneAnswer = event.answer.replace(/\s+$/, '');
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantMsg.id
@@ -88,23 +82,6 @@ export function useChat() {
           );
         }
       });
-
-      // Fetch contextual suggestions after the answer is done.
-      if (doneAnswer) {
-        lastDoneRef.current = { question, answer: doneAnswer };
-        try {
-          const result = await fetchSuggestions(
-            sessionIdRef.current,
-            question,
-            doneAnswer,
-          );
-          if (result.suggestions.length > 0) {
-            setSuggestions(result.suggestions);
-          }
-        } catch {
-          // Silently fall back — ChatInput has its own defaults.
-        }
-      }
     } catch {
       setMessages(prev =>
         prev.map(m =>
@@ -121,9 +98,7 @@ export function useChat() {
   const resetSession = useCallback(() => {
     sessionIdRef.current = clearSessionId();
     setMessages([]);
-    setSuggestions([]);
-    lastDoneRef.current = null;
   }, []);
 
-  return { messages, isStreaming, suggestions, sendMessage, resetSession };
+  return { messages, isStreaming, sendMessage, resetSession };
 }
