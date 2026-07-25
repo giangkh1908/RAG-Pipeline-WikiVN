@@ -88,7 +88,7 @@ class ContextBuilderConfig:
 class GenerationConfig:
     """Configuration for LLM answer generation."""
 
-    model_name: str = "poolside/laguna-s-2.1:free"
+    model_name: str = "google/gemma-3-4b-it"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key_env: str = "OPENROUTER_API_KEY"
     max_tokens: int = 800

@@ -31,7 +31,9 @@ dùng và context đã được trích dẫn. Hỗ trợ hai chế độ:
   đến.
 
 Generator sử dụng mô hình được cấu hình trong `GenerationConfig` (mặc định là
-`poolside/laguna-s-2.1:free` qua OpenRouter). Chế độ streaming phân tích
+`google/gemma-3-4b-it` qua OpenRouter — model rẻ ~$0.05/$0.10 per 1M token,
+chọn thay cho free tier để tránh cold-start/overload flakiness của
+`poolside/laguna-s-2.1:free`). Chế độ streaming phân tích
 Server-Sent Events từ OpenRouter và chỉ sinh nội dung delta.
 
 ### RAGPipeline
