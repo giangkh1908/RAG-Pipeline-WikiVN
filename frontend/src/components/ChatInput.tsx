@@ -8,13 +8,6 @@ interface Props {
 const MAX_CHARS = 500;
 const WARN_THRESHOLD = MAX_CHARS - 50;
 
-const DEFAULT_SUGGESTIONS = [
-  'Vịnh Hạ Long nằm ở đâu?',
-  'Du lịch Hội An nên đi mùa nào?',
-  'Có món ăn đặc sản nào ở Đà Nẵng?',
-  'Nha Trang có bãi biển nổi tiếng nào?',
-];
-
 export function ChatInput({ onSend, disabled }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -46,24 +39,6 @@ export function ChatInput({ onSend, disabled }: Props) {
 
   return (
     <div className="border-t border-gray-100 bg-white pb-3 pt-2 sm:pb-4 sm:pt-2">
-      {/* Starter prompts — horizontal scroll on mobile */}
-      {value === '' && !disabled && (
-        <div className="mx-auto max-w-3xl px-3 pb-2.5 sm:px-4 sm:pb-3">
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:flex-wrap sm:justify-center">
-            {DEFAULT_SUGGESTIONS.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => onSend(s)}
-                className="flex-shrink-0 rounded-full border border-gray-200 px-3 py-1.5 text-xs text-gray-500
-                           hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100 transition-colors"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Input area */}
       <div className="mx-auto max-w-3xl px-3 sm:px-4">
         <div className="flex items-end gap-1.5 rounded-2xl border border-gray-200 bg-white
