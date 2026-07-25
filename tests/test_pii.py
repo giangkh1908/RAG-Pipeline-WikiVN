@@ -70,8 +70,9 @@ class TestRedactPhone:
     def test_personal_mobile_masked(self) -> None:
         out = redact_pii("Call 0987654321 now")
         assert "0987654321" not in out
-        assert out.startswith("Call 09") and out.endswith("21 now")
-        assert "*" in out
+        assert "09" not in out  # prefix masked too, not just the middle
+        assert out.endswith("21 now")  # last 2 kept
+        assert "********" in out
 
     def test_landline_preserved(self) -> None:
         # 02x = Vietnamese landline (hotel reception) — legitimate answer content.

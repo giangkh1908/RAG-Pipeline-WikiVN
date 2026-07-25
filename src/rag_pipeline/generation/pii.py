@@ -18,7 +18,8 @@ Categories redacted (mask, never refuse — the answer still streams):
 - **Vietnamese national ID**: 12-digit CCCD / 9-digit legacy CMND, masked
   fully.
 - **Vietnamese personal mobile** (prefix 03/05/07/08/09, 10 digits): keep
-  prefix + last 2 (``09******21``). **Landline** (prefix 02x — hotel
+  only the last 2 digits, mask the rest including the carrier prefix
+  (``0866710983`` → ``********83``). **Landline** (prefix 02x — hotel
   reception numbers) is deliberately preserved because it is legitimate
   travel-answer content.
 
@@ -57,8 +58,10 @@ _MOBILE = re.compile(r"\b0(?:3|5|7|8|9)\d{8}\b")
 
 
 def _mask_phone(m: re.Match[str]) -> str:
+    # Keep only the last 2 digits so the prefix (which identifies the carrier
+    # / region) is masked too — e.g. "0866710983" -> "********83".
     digits = m.group(0)
-    return digits[:2] + "*" * (len(digits) - 4) + digits[-2:]
+    return "*" * (len(digits) - 2) + digits[-2:]
 
 
 def _mask_cc(m: re.Match[str]) -> str:

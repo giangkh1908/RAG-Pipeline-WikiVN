@@ -498,7 +498,8 @@ class TestRAGPipeline:
 
         done = [e for e in events if e.type == "done"][0]
         assert "0987654321" not in done.data.answer
-        assert "09" in done.data.answer and "21" in done.data.answer  # prefix+last2 kept
+        assert "09" not in done.data.answer  # prefix masked
+        assert "21" in done.data.answer  # last 2 kept
 
     def test_pii_preserves_landline(self) -> None:
         pipeline = self._pii_pipeline(

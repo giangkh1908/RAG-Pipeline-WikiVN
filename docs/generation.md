@@ -172,6 +172,32 @@ Pipeline áp dụng **bốn lớp phòng thủ** (chi tiết trong
    Trích dẫn `[1]` `[2]` và text du lịch thường không bị mask (pattern chỉ khớp PII
    cụ thể). Cấu hình: `pii_redact_enabled` trong `GenerationConfig`.
 
+   #### Follow-up: allowlist số business (chưa triển khai)
+
+   Hiện mọi SĐT di động cá nhân đều bị mask → che luôn cả số business nếu trùng
+   đầu số di động (vd tổng đài hỗ trợ dùng đầu 09, số nhà hàng dùng sim cá nhân).
+   Khi cần hiển thị nguyên một số business, triển khai **allowlist** (chưa có
+   trong code):
+
+   - Một registry `business_contacts` (file JSON/DB) ánh xạ **số chuẩn hoá →
+     nhãn hiển thị + nội dung context**, ví dụ:
+     ```json
+     {
+       "19001234": {"label": "Tổng đài hỗ trợ", "display": "1900 1234"},
+       "0912345678": {"label": "Nhà hàng XYZ", "display": "0912 345 678"}
+     }
+     ```
+   - `redact_pii` tra cứu số trong registry **trước** khi áp dụng mask: nếu khớp
+     → thay bằng `display` (hoặc giữ nguyên + kèm nhãn), không mask. Phần còn lại
+     vẫn đi qua các pattern PII bình thường.
+   - Chuẩn hoá số trước khi tra (bỏ khoảng trắng/dấu, thêm `0` đầu nếu thiếu, hoặc
+     quy về định dạng E.164) để match được dù user/model viết `0912 345 678` hay
+     `+84 912 345 678`.
+   - Cho phép nhúng allowlist qua env (path file) hoặc endpoint admin CRUD; không
+     hard-code trong source.
+   - Lưu ý: allowlist là lỗ hổng nếu bị inject số rác → chỉ admin mới được thêm,
+     không cho user/ngữ cảnh RAG thêm số vào allowlist.
+
 ### Retry robustness
 
 `generate_stream_messages` cũng được làm cứng để Case 1 không hard-fail xấu:
