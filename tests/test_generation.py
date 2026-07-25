@@ -396,3 +396,72 @@ class TestRAGPipeline:
         assert done_events == []  # aborted, no normal completion
         # The guard trips at the 5th consecutive line; the 6th/7th are not streamed.
         assert len(token_events) == 5
+
+    def _judge_pipeline(self, judge_enabled: bool, judge_return) -> tuple[
+        RAGPipeline, MagicMock
+    ]:
+        result = RetrievalResult(
+            chunk_id=uuid4(),
+            content="Chunk content",
+            rrf_score=0.9,
+            rank=1,
+            metadata={"title": "Topic"},
+        )
+        retrieval_pipeline = MagicMock()
+        processed = MagicMock()
+        processed.rewritten_query = "rewritten"
+        processed.normalized_query = "query"
+        processed.intent = "factual"
+        retrieval_pipeline.preprocess.return_value = processed
+        retrieval_pipeline.search_processed.return_value = [result]
+
+        answer_generator = MagicMock()
+        answer_generator.generate_stream.return_value = iter(["Vịnh Hạ Long ", "nằm ở Quảng Ninh."])
+        answer_generator.config.judge_enabled = judge_enabled
+        answer_generator.judge_answer.return_value = judge_return
+
+        pipeline = RAGPipeline(
+            retrieval_pipeline,
+            CitationContextBuilder(),
+            answer_generator,
+        )
+        return pipeline, answer_generator
+
+    def test_judge_rejects_non_valid_answer(self) -> None:
+        pipeline, gen = self._judge_pipeline(True, {"valid": False, "reason": "in số 1..50"})
+        events = list(pipeline.answer_stream("query"))
+
+        error_events = [e for e in events if e.type == "error"]
+        done_events = [e for e in events if e.type == "done"]
+        assert len(error_events) == 1
+        assert "không thể trả lời yêu cầu" in error_events[0].message
+        assert done_events == []  # rejected → no done
+        gen.judge_answer.assert_called_once()
+
+    def test_judge_accepts_valid_answer(self) -> None:
+        pipeline, gen = self._judge_pipeline(True, {"valid": True, "reason": "ok"})
+        events = list(pipeline.answer_stream("query"))
+
+        done_events = [e for e in events if e.type == "done"]
+        error_events = [e for e in events if e.type == "error"]
+        assert len(done_events) == 1
+        assert error_events == []
+        gen.judge_answer.assert_called_once()
+
+    def test_judge_disabled_by_default(self) -> None:
+        pipeline, gen = self._judge_pipeline(False, None)
+        events = list(pipeline.answer_stream("query"))
+
+        done_events = [e for e in events if e.type == "done"]
+        assert len(done_events) == 1
+        gen.judge_answer.assert_not_called()
+
+    def test_judge_failure_falls_back_to_accept(self) -> None:
+        pipeline, gen = self._judge_pipeline(True, None)  # judge error → None → accept
+        events = list(pipeline.answer_stream("query"))
+
+        done_events = [e for e in events if e.type == "done"]
+        error_events = [e for e in events if e.type == "error"]
+        assert len(done_events) == 1
+        assert error_events == []  # judge failure must NOT reject
+        gen.judge_answer.assert_called_once()

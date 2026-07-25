@@ -242,6 +242,28 @@ class RAGPipeline:
 
         answer = "".join(answer_parts)
         answer = self._strip_question_echo(query, answer)
+
+        # LLM-judge output classifier (opt-in). Post-hoc: tokens have already
+        # streamed, so a rejection replaces the streamed answer with a refusal
+        # (consistent with the number-run output guard above). On judge failure
+        # (None) the answer is accepted — the judge never hard-fails.
+        if self.answer_generator.config.judge_enabled:
+            verdict = self.answer_generator.judge_answer(query, answer)
+            if verdict is not None and not verdict.get("valid", True):
+                if store is not None and session_id is not None and turn_no is not None:
+                    try:
+                        store.update_turn_answer(
+                            session_id,
+                            turn_no,
+                            self._SPAMMY_OUTPUT_MESSAGE,
+                            processed.intent,
+                            0,
+                        )
+                    except Exception:
+                        pass
+                yield GenerationEvent(type="error", message=self._SPAMMY_OUTPUT_MESSAGE)
+                return
+
         answer_tokens_hint = est_tokens(answer, self.answer_generator.config.max_tokens // 4 or 3)
         sources = self._extract_sources(answer, built)
         result = AnswerResult(

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from rag_pipeline.config import GenerationConfig
+from rag_pipeline.generation.judge import judge_answer
 from rag_pipeline.generation.models import GeneratedAnswer
 from rag_pipeline.generation.prompt_safety import build_user_prompt
 
@@ -169,3 +170,19 @@ class LLMAnswerGenerator:
 
     def close(self) -> None:
         self._client.close()
+
+    def judge_answer(self, query: str, answer: str) -> dict[str, Any] | None:
+        """Classify a generated answer as a legitimate travel answer or
+        injection compliance. Returns ``None`` when the judge is disabled or
+        fails (safe fallback — caller accepts the answer). See ``judge.py``.
+        """
+        if not self.config.judge_enabled:
+            return None
+        return judge_answer(
+            self._client,
+            self.config.judge_model_name,
+            query,
+            answer,
+            max_tokens=self.config.judge_max_tokens,
+            temperature=self.config.judge_temperature,
+        )

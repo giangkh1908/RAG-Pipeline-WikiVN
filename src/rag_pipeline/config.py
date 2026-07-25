@@ -95,6 +95,11 @@ class GenerationConfig:
     temperature: float = 0.3
     timeout_seconds: float = 60.0
     max_retries: int = 3
+    # Post-generation LLM-judge output classifier (opt-in, see judge.py).
+    judge_enabled: bool = False
+    judge_model_name: str = "deepseek/deepseek-v4-flash"
+    judge_max_tokens: int = 200
+    judge_temperature: float = 0.0
 
 
 @dataclass(slots=True)
